@@ -9,12 +9,12 @@ import (
 )
 
 type Config struct {
-	Node      string   `yaml:"node"`
-	MasterURL string   `yaml:"master_url"`
-	Token     string   `yaml:"token"`
-	Paths     []string `yaml:"paths"`
-	Interval  string   `yaml:"interval"`
-	TmpDir    string   `yaml:"tmp_dir"`
+	Node         string   `yaml:"node"`
+	MasterURL    string   `yaml:"master_url"`
+	Token        string   `yaml:"token"`
+	Paths        []string `yaml:"paths"`
+	PollInterval string   `yaml:"poll_interval"`
+	TmpDir       string   `yaml:"tmp_dir"`
 }
 
 func Load(path string) (*Config, error) {
@@ -31,7 +31,7 @@ func Load(path string) (*Config, error) {
 	cfg.Node = strings.TrimSpace(cfg.Node)
 	cfg.MasterURL = strings.TrimSpace(cfg.MasterURL)
 	cfg.Token = strings.TrimSpace(cfg.Token)
-	cfg.Interval = strings.TrimSpace(cfg.Interval)
+	cfg.PollInterval = strings.TrimSpace(cfg.PollInterval)
 
 	if cfg.Node == "" {
 		return nil, fmt.Errorf("node is required")
@@ -45,8 +45,8 @@ func Load(path string) (*Config, error) {
 	if len(cfg.Paths) == 0 {
 		return nil, fmt.Errorf("paths is required")
 	}
-	if cfg.Interval == "" {
-		cfg.Interval = "1h"
+	if cfg.PollInterval == "" {
+		cfg.PollInterval = "30s"
 	}
 	if cfg.TmpDir == "" {
 		cfg.TmpDir = "/tmp/backup-agent"

@@ -17,6 +17,7 @@ schedule:
 agent:
   listen: "0.0.0.0:9876"
   max_staging_age: "2h"
+  sync_timeout: "3m"
 
 nodes:
   # SSH-нода: master сам забирает файлы

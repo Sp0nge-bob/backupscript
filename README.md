@@ -180,6 +180,7 @@ schedule:
 agent:
   listen: "0.0.0.0:9876"
   max_staging_age: "2h"
+  sync_timeout: "3m"
 
 nodes:
   - name: "nl2"
@@ -350,7 +351,7 @@ token: "a8f3c91e2b7d4f6e8c0a1b2c3d4e5f6"
 paths:
   - /etc/nginx/conf.d/
   - /etc/x-ui/x-ui.db
-interval: "1h"
+poll_interval: "30s"
 tmp_dir: "/tmp/backup-agent"
 ```
 
@@ -368,7 +369,7 @@ journalctl -u backup-agent -f
 /backup
 ```
 
-Агент каждые `interval` отправляет heartbeat и загружает файлы. При `/backup` master берёт последнюю загрузку из staging.
+Агент каждые `poll_interval` (по умолчанию 30s) отправляет heartbeat на master. Когда вы жмёте `/backup` (или срабатывает расписание), master **запрашивает свежую синхронизацию** — агент сразу упаковывает актуальные файлы и загружает их. Master ждёт до `sync_timeout` (по умолчанию 3m), затем собирает zip.
 
 ---
 

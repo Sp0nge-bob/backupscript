@@ -122,6 +122,9 @@ func (s *Service) handleCallback(cb *tgbotapi.CallbackQuery) {
 
 func (s *Service) runBackup(chatID, userID int64) {
 	s.sendText(chatID, "Создаю бекап...")
+	if s.hasAgentNodes() {
+		s.sendText(chatID, "Запрашиваю свежие данные с agent-нод...")
+	}
 
 	result, err := s.CreateBackup()
 	if err != nil {
@@ -159,13 +162,31 @@ func (s *Service) runBackup(chatID, userID int64) {
 	log.Printf("backup sent to chat %d (%s)", chatID, backup.FormatSize(result.Size))
 }
 
+func (s *Service) hasAgentNodes() bool {
+	for _, node := range s.cfg.Nodes {
+		if node.NormalizedMode() == config.NodeModeAgent {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) CreateBackup() (*backup.Result, error) {
+	var syncWarnings []string
+	if s.agentReg != nil && s.hasAgentNodes() {
+		warns, err := agent.SyncAgentNodes(s.cfg, s.agentReg)
+		syncWarnings = warns
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	maxStagingAge, err := s.cfg.Agent.MaxStagingAgeDuration()
 	if err != nil {
 		return nil, err
 	}
 
-	return backup.Create(backup.Config{
+	result, err := backup.Create(backup.Config{
 		Name:          s.cfg.Backup.Name,
 		Paths:         s.cfg.Backup.Paths,
 		Exclude:       s.cfg.Backup.Exclude,
@@ -187,6 +208,11 @@ func (s *Service) CreateBackup() (*backup.Result, error) {
 			return ""
 		},
 	})
+	if err != nil {
+		return nil, err
+	}
+	result.Warnings = append(syncWarnings, result.Warnings...)
+	return result, nil
 }
 
 func (s *Service) SendBackupTo(chatID int64) error {

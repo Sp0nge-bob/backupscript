@@ -105,6 +105,9 @@ func Load() (*Config, error) {
 	if yamlCfg.Agent.MaxStagingAge == "" {
 		yamlCfg.Agent.MaxStagingAge = "2h"
 	}
+	if yamlCfg.Agent.SyncTimeout == "" {
+		yamlCfg.Agent.SyncTimeout = "3m"
+	}
 	if yamlCfg.Nodes == nil {
 		yamlCfg.Nodes = []NodeConfig{}
 	}

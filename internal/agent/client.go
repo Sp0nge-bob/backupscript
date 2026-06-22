@@ -23,7 +23,12 @@ type ClientConfig struct {
 	Version   string
 }
 
-func Heartbeat(cfg ClientConfig) error {
+type HeartbeatResponse struct {
+	OK            bool `json:"ok"`
+	SyncRequired  bool `json:"sync_required"`
+}
+
+func Heartbeat(cfg ClientConfig) (HeartbeatResponse, error) {
 	reports := make([]PathReport, 0, len(cfg.Paths))
 	for _, p := range cfg.Paths {
 		_, err := os.Stat(p)
@@ -37,20 +42,26 @@ func Heartbeat(cfg ClientConfig) error {
 		"paths":   reports,
 	})
 	if err != nil {
-		return err
+		return HeartbeatResponse{}, err
 	}
 
 	url := strings.TrimRight(cfg.MasterURL, "/") + "/api/agent/heartbeat"
 	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return HeartbeatResponse{}, err
 	}
 	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("heartbeat status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+		return HeartbeatResponse{}, fmt.Errorf("heartbeat status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}
-	return nil
+
+	var result HeartbeatResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		return HeartbeatResponse{}, fmt.Errorf("parse heartbeat response: %w", err)
+	}
+	return result, nil
 }
 
 func Upload(cfg ClientConfig, tmpDir string) error {

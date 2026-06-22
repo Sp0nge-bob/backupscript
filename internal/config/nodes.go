@@ -15,6 +15,7 @@ const (
 type AgentConfig struct {
 	Listen        string `yaml:"listen"`
 	MaxStagingAge string `yaml:"max_staging_age"`
+	SyncTimeout   string `yaml:"sync_timeout"`
 }
 
 type NodeConfig struct {
@@ -64,6 +65,18 @@ func (n NodeConfig) Validate() error {
 		return fmt.Errorf("node %s: unknown mode %q (use ssh or agent)", name, n.Mode)
 	}
 	return nil
+}
+
+func (a AgentConfig) SyncTimeoutDuration() (time.Duration, error) {
+	raw := strings.TrimSpace(a.SyncTimeout)
+	if raw == "" {
+		return 3 * time.Minute, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid agent.sync_timeout %q: %w", raw, err)
+	}
+	return d, nil
 }
 
 func (a AgentConfig) MaxStagingAgeDuration() (time.Duration, error) {

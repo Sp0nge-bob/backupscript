@@ -10,7 +10,7 @@ import (
 	"github.com/Sp0nge-bob/backupscript/internal/interval"
 )
 
-const version = "1.0.0"
+const version = "1.1.0"
 
 func main() {
 	log.SetFlags(log.LstdFlags)
@@ -25,9 +25,9 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	d, err := interval.Parse(cfg.Interval)
+	pollInterval, err := interval.Parse(cfg.PollInterval)
 	if err != nil {
-		log.Fatalf("interval: %v", err)
+		log.Fatalf("poll_interval: %v", err)
 	}
 
 	clientCfg := agent.ClientConfig{
@@ -38,26 +38,29 @@ func main() {
 		Version:   version,
 	}
 
-	log.Printf("backup-agent %s for node %s", version, cfg.Node)
-	runOnce(clientCfg, cfg.TmpDir)
+	log.Printf("backup-agent %s for node %s (poll %s)", version, cfg.Node, cfg.PollInterval)
+	runPoll(clientCfg, cfg.TmpDir)
 
-	ticker := time.NewTicker(d)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for range ticker.C {
-		runOnce(clientCfg, cfg.TmpDir)
+		runPoll(clientCfg, cfg.TmpDir)
 	}
 }
 
-func runOnce(cfg agent.ClientConfig, tmpDir string) {
-	if err := agent.Heartbeat(cfg); err != nil {
+func runPoll(cfg agent.ClientConfig, tmpDir string) {
+	resp, err := agent.Heartbeat(cfg)
+	if err != nil {
 		log.Printf("heartbeat failed: %v", err)
-	} else {
-		log.Printf("heartbeat ok")
-	}
-
-	if err := agent.Upload(cfg, tmpDir); err != nil {
-		log.Printf("upload failed: %v", err)
 		return
 	}
-	log.Printf("upload ok")
+
+	if resp.SyncRequired {
+		log.Printf("master requested fresh sync")
+		if err := agent.Upload(cfg, tmpDir); err != nil {
+			log.Printf("sync upload failed: %v", err)
+			return
+		}
+		log.Printf("sync upload ok")
+	}
 }

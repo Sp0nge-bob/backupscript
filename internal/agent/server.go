@@ -71,8 +71,15 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.registry.RecordHeartbeat(node.Name, req.Version, req.Paths)
+	syncRequired := s.registry.SyncRequired(node.Name)
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"ok":true}`))
+	if syncRequired {
+		_, _ = w.Write([]byte(`{"ok":true,"sync_required":true}`))
+		return
+	}
+	_, _ = w.Write([]byte(`{"ok":true,"sync_required":false}`))
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
