@@ -143,14 +143,13 @@ ssh -p 2222 -i /root/.ssh/backup_nodes -o ConnectTimeout=10 -o StrictHostKeyChec
 
 ## Шаг 4. Добавьте ноду в config.yaml
 
-На master:
+**4a.** На master откройте конфиг в терминале:
 
 ```bash
 nano /opt/backup-bot/config.yaml
-systemctl restart backup-bot
 ```
 
-Пример секции:
+**4b.** В открывшемся редакторе вставьте **только YAML** (не команды shell):
 
 ```yaml
 nodes:
@@ -163,6 +162,16 @@ nodes:
     paths:
       - /etc/nginx/conf.d/
       - /etc/x-ui/x-ui.db
+```
+
+> В `config.yaml` не должно быть строк вроде `systemctl`, `nano`, `bash` — только YAML. Иначе бот не запустится.
+
+Сохраните в nano: `Ctrl+O` → Enter → `Ctrl+X`.
+
+**4c.** Уже **в терминале** (не в файле) перезапустите бот:
+
+```bash
+systemctl restart backup-bot
 ```
 
 | Поле | Описание |
@@ -202,6 +211,7 @@ nodes:
 | `Connection refused` | Откройте порт SSH в firewall ноды, проверьте `host` и `port` |
 | `No such file` в предупреждениях | Путь не существует на ноде — добавьте или уберите через `/nodes paths` |
 | Нода пропущена в архиве | Смотрите предупреждения в Telegram; проверьте `/nodes ping` |
+| Бот не стартует после правки config | В файле случайно оказалась shell-команда — удалите строки `systemctl`, `nano` и т.п. |
 
 ---
 

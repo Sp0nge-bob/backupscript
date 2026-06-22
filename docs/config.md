@@ -2,7 +2,15 @@
 
 Файл на master: `/opt/backup-bot/config.yaml`
 
-После изменений:
+Открыть для правки:
+
+```bash
+nano /opt/backup-bot/config.yaml
+```
+
+В файл вставляйте **только YAML** из примеров ниже — не `systemctl`, не `nano`.
+
+После сохранения (`Ctrl+O`, Enter, `Ctrl+X`) перезапустите бот **в терминале**:
 
 ```bash
 systemctl restart backup-bot
