@@ -96,7 +96,7 @@ wget -qO /tmp/ssh-node-authorize.sh https://raw.githubusercontent.com/Sp0nge-bob
 Дальше скрипт спросит:
 
 1. `Публичный ключ master:` — вставьте строку с master (`cat /root/.ssh/backup_nodes.pub`)
-2. `IP master:` — IP master или Enter (без ограничения)
+2. `IP master:` — IP master-сервера или Enter (без ограничения)
 
 ### Способ B: без вопросов (ключ в аргументе)
 
@@ -132,13 +132,13 @@ grep backupscript /root/.ssh/authorized_keys
 На **master** (подставьте IP, порт и пользователя ноды):
 
 ```bash
-# Стандартный порт 22:
+# Стандартный порт 22 (IP_НОДЫ — адрес удалённого VPS):
 ssh -i /root/.ssh/backup_nodes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
-  root@203.0.113.10 "ls /etc/nginx/conf.d/"
+  root@IP_НОДЫ "ls /etc/nginx/conf.d/"
 
-# Нестандартный порт (например 2222) — обязательно -p:
-ssh -p 2222 -i /root/.ssh/backup_nodes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
-  root@203.0.113.10 "ls /etc/nginx/conf.d/"
+# Нестандартный SSH-порт — обязательно -p:
+ssh -p SSH_ПОРТ -i /root/.ssh/backup_nodes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+  root@IP_НОДЫ "ls /etc/nginx/conf.d/"
 ```
 
 Если команда выполнилась без пароля — SSH настроен.  
@@ -160,8 +160,8 @@ nano /opt/backup-bot/config.yaml
 nodes:
   - name: "nl2"
     mode: "ssh"
-    host: "203.0.113.10"
-    port: 2222          # ваш SSH-порт; если 22 — можно не менять
+    host: "203.0.113.10"   # IP удалённой ноды
+    port: 22               # ваш SSH-порт (если не 22 — укажите свой)
     user: "root"
     key_file: "/root/.ssh/backup_nodes"
     paths:
