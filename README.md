@@ -8,7 +8,7 @@ Telegram-бот для Linux: собирает **один zip-архив** из 
 
 | Шаг | Что делать | Документация |
 |-----|------------|--------------|
-| 1 | Установить **master** (бот + API агентов) | [Установка master](docs/install-master.md) |
+| 1 | Установить **master** (бот + API агентов) — скрипт спросит токен и ID | [Установка master](docs/install-master.md) |
 | 2 | Настроить `config.yaml` | [Конфигурация](docs/config.md) |
 | 3 | Подключить ноды | [SSH-нода](docs/install-ssh-node.md) или [Agent-нода](docs/install-agent-node.md) |
 | 4 | Проверить `/backup` в Telegram | [Команды бота](docs/commands.md) |
