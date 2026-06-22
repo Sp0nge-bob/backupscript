@@ -67,7 +67,7 @@ func (s *Service) handleCommand(msg *tgbotapi.Message) {
 
 	switch msg.Command() {
 	case "start":
-		text := "Бот бекапов сервера.\n\nКоманды:\n/backup — создать и отправить архив\n/schedule — интервал автобекапа (30m, 6h, 7d)\n/list — пути и расписание\n/status — статус\n/help — справка"
+		text := "Бот бекапов сервера.\n\nКоманды:\n/backup — создать и отправить архив\n/paths — пути бекапа (add/remove)\n/schedule — интервал автобекапа (30m, 6h, 7d)\n/list — все настройки\n/status — статус\n/help — справка"
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("Сделать бекап", "backup"),
@@ -86,8 +86,10 @@ func (s *Service) handleCommand(msg *tgbotapi.Message) {
 		s.sendStatus(msg.Chat.ID)
 	case "schedule":
 		s.handleSchedule(msg.Chat.ID, strings.TrimSpace(msg.CommandArguments()))
+	case "paths":
+		s.handlePaths(msg.Chat.ID, strings.TrimSpace(msg.CommandArguments()))
 	case "help":
-		s.sendText(msg.Chat.ID, "Команды:\n/backup — архив и отправка\n/schedule — автобекап: /schedule 6h, /schedule off\n/list — пути бекапа и интервал\n/status — последний бекап\n/help — эта справка\n\nИнтервал: 30m, 6h, 7d, 1w (минимум 1m).\nПути задаются в config.yaml.")
+		s.sendText(msg.Chat.ID, "Команды:\n/backup — архив и отправка\n/paths — пути: add, remove, list\n/schedule — автобекап: /schedule 6h, /schedule off\n/list — все настройки\n/status — последний бекап\n/help — эта справка\n\n/paths add /etc/x-ui/x-ui.db\n/paths remove /etc/foo\n\nИнтервал: 30m, 6h, 7d, 1w (минимум 1m).")
 	default:
 		s.sendText(msg.Chat.ID, "Неизвестная команда. /help")
 	}
@@ -189,6 +191,72 @@ func (s *Service) SendBackupTo(chatID int64) error {
 		Success: true,
 	})
 	return nil
+}
+
+func (s *Service) handlePaths(chatID int64, args string) {
+	if args == "" {
+		s.sendPathsHelp(chatID)
+		return
+	}
+
+	parts := strings.SplitN(args, " ", 2)
+	action := strings.ToLower(strings.TrimSpace(parts[0]))
+	pathArg := ""
+	if len(parts) > 1 {
+		pathArg = strings.TrimSpace(parts[1])
+	}
+
+	switch action {
+	case "list":
+		s.sendPathsList(chatID)
+	case "add":
+		if pathArg == "" {
+			s.sendText(chatID, "Укажите путь: /paths add /etc/nginx/nginx.conf")
+			return
+		}
+		if err := s.cfg.AddBackupPath(pathArg); err != nil {
+			s.sendText(chatID, "Ошибка: "+err.Error())
+			return
+		}
+		s.sendText(chatID, fmt.Sprintf("Добавлено: %s", pathArg))
+		s.sendPathsList(chatID)
+	case "remove", "rm", "del":
+		if pathArg == "" {
+			s.sendText(chatID, "Укажите путь: /paths remove /etc/foo")
+			return
+		}
+		if err := s.cfg.RemoveBackupPath(pathArg); err != nil {
+			s.sendText(chatID, "Ошибка: "+err.Error())
+			return
+		}
+		s.sendText(chatID, fmt.Sprintf("Удалено: %s", pathArg))
+		s.sendPathsList(chatID)
+	default:
+		s.sendPathsHelp(chatID)
+	}
+}
+
+func (s *Service) sendPathsHelp(chatID int64) {
+	s.sendText(chatID, "Пути бекапа (сохраняются в config.yaml):\n\n/paths list\n/paths add /etc/nginx/nginx.conf\n/paths add /etc/x-ui/\n/paths remove /etc/foo")
+}
+
+func (s *Service) sendPathsList(chatID int64) {
+	statuses := backup.InspectPaths(s.cfg.Backup.Paths)
+	var b strings.Builder
+	b.WriteString("Пути бекапа:\n\n")
+	if len(statuses) == 0 {
+		b.WriteString("(пусто)\n")
+	}
+	for _, st := range statuses {
+		state := "ok"
+		if !st.Exists {
+			state = "missing"
+		} else if st.IsDir {
+			state = "dir"
+		}
+		b.WriteString(fmt.Sprintf("%s — %s\n", state, st.Path))
+	}
+	s.sendText(chatID, b.String())
 }
 
 func (s *Service) sendList(chatID int64) {

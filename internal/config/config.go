@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -137,7 +138,22 @@ func (s ScheduleConfig) ScheduleDescription() string {
 	return "не настроено"
 }
 
-func (c *Config) SaveSchedule(schedule ScheduleConfig) error {
+func NormalizeBackupPath(p string) (string, error) {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return "", fmt.Errorf("путь пустой")
+	}
+	if !filepath.IsAbs(p) {
+		return "", fmt.Errorf("путь должен быть абсолютным, например /etc/nginx/nginx.conf")
+	}
+	cleaned := filepath.Clean(p)
+	if cleaned == "/" {
+		return "", fmt.Errorf("нельзя добавить корень /")
+	}
+	return cleaned, nil
+}
+
+func (c *Config) saveYAML(mutate func(*YAMLConfig) error) error {
 	data, err := os.ReadFile(c.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("read config %s: %w", c.ConfigPath, err)
@@ -148,7 +164,10 @@ func (c *Config) SaveSchedule(schedule ScheduleConfig) error {
 		return fmt.Errorf("parse config: %w", err)
 	}
 
-	yamlCfg.Schedule = schedule
+	if err := mutate(&yamlCfg); err != nil {
+		return err
+	}
+
 	out, err := yaml.Marshal(&yamlCfg)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
@@ -158,6 +177,79 @@ func (c *Config) SaveSchedule(schedule ScheduleConfig) error {
 		return fmt.Errorf("write config %s: %w", c.ConfigPath, err)
 	}
 
-	c.Schedule = schedule
+	c.Backup = yamlCfg.Backup
+	c.Schedule = yamlCfg.Schedule
 	return nil
+}
+
+func (c *Config) SaveSchedule(schedule ScheduleConfig) error {
+	return c.saveYAML(func(yamlCfg *YAMLConfig) error {
+		yamlCfg.Schedule = schedule
+		return nil
+	})
+}
+
+func (c *Config) SaveBackup(backupCfg BackupConfig) error {
+	if len(backupCfg.Paths) == 0 {
+		return fmt.Errorf("должен остаться хотя бы один путь")
+	}
+	return c.saveYAML(func(yamlCfg *YAMLConfig) error {
+		if backupCfg.Name == "" {
+			backupCfg.Name = yamlCfg.Backup.Name
+		}
+		if backupCfg.Name == "" {
+			backupCfg.Name = "server-backup"
+		}
+		if backupCfg.Exclude == nil {
+			backupCfg.Exclude = yamlCfg.Backup.Exclude
+		}
+		yamlCfg.Backup = backupCfg
+		return nil
+	})
+}
+
+func (c *Config) AddBackupPath(path string) error {
+	normalized, err := NormalizeBackupPath(path)
+	if err != nil {
+		return err
+	}
+
+	for _, existing := range c.Backup.Paths {
+		if filepath.Clean(existing) == normalized {
+			return fmt.Errorf("путь уже есть: %s", normalized)
+		}
+	}
+
+	paths := append(append([]string{}, c.Backup.Paths...), normalized)
+	backupCfg := c.Backup
+	backupCfg.Paths = paths
+	return c.SaveBackup(backupCfg)
+}
+
+func (c *Config) RemoveBackupPath(path string) error {
+	normalized, err := NormalizeBackupPath(path)
+	if err != nil {
+		return err
+	}
+
+	if len(c.Backup.Paths) <= 1 {
+		return fmt.Errorf("нельзя удалить последний путь")
+	}
+
+	var paths []string
+	found := false
+	for _, existing := range c.Backup.Paths {
+		if filepath.Clean(existing) == normalized {
+			found = true
+			continue
+		}
+		paths = append(paths, existing)
+	}
+	if !found {
+		return fmt.Errorf("путь не найден: %s", normalized)
+	}
+
+	backupCfg := c.Backup
+	backupCfg.Paths = paths
+	return c.SaveBackup(backupCfg)
 }
