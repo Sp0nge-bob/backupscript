@@ -79,20 +79,18 @@ curl -4 -s ifconfig.me; echo
 
 > **Не вставляйте многострочный скрипт в SSH построчно** — терминал часто ломает вставку. Используйте **одну команду** ниже.
 
-### Способ A (рекомендуется): одна строка
+### Способ A (рекомендуется): скачать и запустить
 
-На **удалённом VPS** под root — скопируйте **одну** команду и Enter:
+На **удалённом VPS** под root — **одна** команда (не `curl | bash` — он ломает ввод):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/backupscript/main/scripts/ssh-node-authorize.sh | bash
+curl -fsSL -o /tmp/ssh-node-authorize.sh https://raw.githubusercontent.com/Sp0nge-bob/backupscript/main/scripts/ssh-node-authorize.sh && bash /tmp/ssh-node-authorize.sh
 ```
-
-> При `curl | bash` ввод идёт с `/dev/tty` — когда спросит ключ, вставьте строку и Enter.
 
 Если нет `curl`:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/Sp0nge-bob/backupscript/main/scripts/ssh-node-authorize.sh | bash
+wget -qO /tmp/ssh-node-authorize.sh https://raw.githubusercontent.com/Sp0nge-bob/backupscript/main/scripts/ssh-node-authorize.sh && bash /tmp/ssh-node-authorize.sh
 ```
 
 Дальше скрипт спросит:
@@ -100,13 +98,22 @@ wget -qO- https://raw.githubusercontent.com/Sp0nge-bob/backupscript/main/scripts
 1. `Публичный ключ master:` — вставьте строку с master (`cat /root/.ssh/backup_nodes.pub`)
 2. `IP master:` — IP master или Enter (без ограничения)
 
-### Способ B: скачать файл и запустить
+### Способ B: без вопросов (ключ в аргументе)
+
+На **master** скопируйте ключ:
+
+```bash
+cat /root/.ssh/backup_nodes.pub
+```
+
+На **ноде** (подставьте ключ и IP master):
 
 ```bash
 curl -fsSL -o /tmp/ssh-node-authorize.sh https://raw.githubusercontent.com/Sp0nge-bob/backupscript/main/scripts/ssh-node-authorize.sh
-bash /tmp/ssh-node-authorize.sh
-rm -f /tmp/ssh-node-authorize.sh
+bash /tmp/ssh-node-authorize.sh 'ssh-ed25519 AAAA... backupscript' 'IP_MASTER'
 ```
+
+Второй аргумент (IP) можно опустить.
 
 ### Проверка на ноде
 
@@ -210,7 +217,8 @@ systemctl restart backup-bot
 | `No such file` в предупреждениях | Путь не существует на ноде — добавьте или уберите через `/nodes paths` |
 | Нода пропущена в архиве | Смотрите предупреждения в Telegram; проверьте `/nodes ping` |
 | Бот не стартует после правки config | В файле случайно оказалась shell-команда — удалите строки `systemctl`, `nano` и т.п. |
-| Скрипт на ноде «развалился» при вставке | Не копируйте многострочный bash в SSH — используйте `curl ... \| bash` (шаг 2, способ A) |
+| Скрипт сразу пишет «Ключ не указан» | Не используйте `curl \| bash` — скачайте файл и `bash /tmp/ssh-node-authorize.sh` (способ A) |
+| Скрипт на ноде «развалился» при вставке | Не копируйте многострочный bash в SSH — способ A или B |
 
 ---
 
