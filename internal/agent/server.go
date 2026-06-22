@@ -27,7 +27,7 @@ func NewServer(cfg *config.Config, registry *Registry) *Server {
 
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/agent/heartbeat", s.handleHeartbeat)
+	mux.HandleFunc("/api/agent/wait-sync", s.handleWaitSync)
 	mux.HandleFunc("/api/agent/upload", s.handleUpload)
 
 	server := &http.Server{
@@ -45,41 +45,55 @@ func (s *Server) Start() error {
 	return nil
 }
 
-type heartbeatRequest struct {
-	Node    string       `json:"node"`
-	Token   string       `json:"token"`
-	Version string       `json:"version"`
-	Paths   []PathReport `json:"paths"`
-}
-
-func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+func (s *Server) handleWaitSync(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var req heartbeatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
-		return
-	}
+	nodeName := r.URL.Query().Get("node")
+	token := r.URL.Query().Get("token")
+	timeoutRaw := r.URL.Query().Get("timeout")
 
-	node, err := s.authenticate(req.Node, req.Token)
+	node, err := s.authenticate(nodeName, token)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	s.registry.RecordHeartbeat(node.Name, req.Version, req.Paths)
-	syncRequired := s.registry.SyncRequired(node.Name)
+	timeout, err := time.ParseDuration(timeoutRaw)
+	if err != nil || timeout <= 0 {
+		timeout = 6 * time.Hour
+	}
+	if timeout > 6*time.Hour {
+		timeout = 6 * time.Hour
+	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if syncRequired {
-		_, _ = w.Write([]byte(`{"ok":true,"sync_required":true}`))
+	s.registry.RecordContact(node.Name)
+
+	waiter := s.registry.RegisterWaiter(node.Name)
+	defer s.registry.UnregisterWaiter(node.Name, waiter)
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case syncRequired := <-waiter:
+		writeWaitResponse(w, syncRequired)
+	case <-timer.C:
+		writeWaitResponse(w, s.registry.SyncRequired(node.Name))
+	case <-r.Context().Done():
 		return
 	}
-	_, _ = w.Write([]byte(`{"ok":true,"sync_required":false}`))
+}
+
+func writeWaitResponse(w http.ResponseWriter, syncRequired bool) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]bool{
+		"ok":            true,
+		"sync_required": syncRequired,
+	})
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {

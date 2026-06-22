@@ -23,41 +23,39 @@ type Registry struct {
 	mu            sync.RWMutex
 	nodes         map[string]*NodeState
 	syncRequested map[string]time.Time
+	waiters       map[string]map[chan bool]struct{}
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
 		nodes:         make(map[string]*NodeState),
 		syncRequested: make(map[string]time.Time),
+		waiters:       make(map[string]map[chan bool]struct{}),
 	}
 }
 
-func (r *Registry) RecordHeartbeat(node string, version string, paths []PathReport) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
+func (r *Registry) touchNode(node string) *NodeState {
 	state, ok := r.nodes[node]
 	if !ok {
 		state = &NodeState{}
 		r.nodes[node] = state
 	}
 	state.LastSeen = time.Now()
-	state.Version = version
-	state.PathReports = paths
-	state.LastError = ""
+	return state
+}
+
+func (r *Registry) RecordContact(node string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.touchNode(node)
 }
 
 func (r *Registry) RecordUpload(node string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	state, ok := r.nodes[node]
-	if !ok {
-		state = &NodeState{}
-		r.nodes[node] = state
-	}
+	state := r.touchNode(node)
 	now := time.Now()
-	state.LastSeen = now
 	state.LastUpload = now
 	state.LastError = ""
 	delete(r.syncRequested, node)
@@ -67,13 +65,33 @@ func (r *Registry) RecordError(node, errMsg string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	state, ok := r.nodes[node]
-	if !ok {
-		state = &NodeState{}
-		r.nodes[node] = state
-	}
-	state.LastSeen = time.Now()
+	state := r.touchNode(node)
 	state.LastError = errMsg
+}
+
+func (r *Registry) RegisterWaiter(node string) chan bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ch := make(chan bool, 1)
+	if r.waiters[node] == nil {
+		r.waiters[node] = make(map[chan bool]struct{})
+	}
+	r.waiters[node][ch] = struct{}{}
+	return ch
+}
+
+func (r *Registry) UnregisterWaiter(node string, ch chan bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if waiters, ok := r.waiters[node]; ok {
+		delete(waiters, ch)
+		if len(waiters) == 0 {
+			delete(r.waiters, node)
+		}
+	}
+	close(ch)
 }
 
 func (r *Registry) RequestSync(node string) time.Time {
@@ -82,7 +100,23 @@ func (r *Registry) RequestSync(node string) time.Time {
 
 	now := time.Now()
 	r.syncRequested[node] = now
+	r.wakeWaitersLocked(node, true)
 	return now
+}
+
+func (r *Registry) WakeNode(node string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.wakeWaitersLocked(node, false)
+}
+
+func (r *Registry) wakeWaitersLocked(node string, syncRequired bool) {
+	for ch := range r.waiters[node] {
+		select {
+		case ch <- syncRequired:
+		default:
+		}
+	}
 }
 
 func (r *Registry) SyncRequired(node string) bool {
@@ -138,4 +172,22 @@ func (r *Registry) WaitForFreshUpload(node string, since time.Time, timeout time
 		time.Sleep(2 * time.Second)
 	}
 	return fmt.Errorf("таймаут ожидания свежих данных от %s (%s)", node, timeout)
+}
+
+func (r *Registry) WaitForContact(node string, since time.Time, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		state, ok := r.Get(node)
+		if ok && !state.LastSeen.IsZero() && state.LastSeen.After(since) {
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
+	return fmt.Errorf("агент %s не ответил за %s", node, timeout)
+}
+
+func (r *Registry) HasWaiter(node string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.waiters[node]) > 0
 }

@@ -51,6 +51,7 @@
 ```
 /nodes list
 /nodes status nl2
+/nodes ping nl3
 /nodes paths list nl2
 /nodes paths add nl2 /etc/nginx/conf.d/
 /nodes paths remove nl2 /etc/foo
@@ -351,7 +352,7 @@ token: "a8f3c91e2b7d4f6e8c0a1b2c3d4e5f6"
 paths:
   - /etc/nginx/conf.d/
   - /etc/x-ui/x-ui.db
-poll_interval: "30s"
+listen_timeout: "6h"
 tmp_dir: "/tmp/backup-agent"
 ```
 
@@ -369,7 +370,11 @@ journalctl -u backup-agent -f
 /backup
 ```
 
-Агент каждые `poll_interval` (по умолчанию 30s) отправляет heartbeat на master. Когда вы жмёте `/backup` (или срабатывает расписание), master **запрашивает свежую синхронизацию** — агент сразу упаковывает актуальные файлы и загружает их. Master ждёт до `sync_timeout` (по умолчанию 3m), затем собирает zip.
+Агент держит **одно долгое соединение** с master (до `listen_timeout`, по умолчанию 6h) — это не heartbeat, а ожидание команды. Нагрузка минимальная: нет периодических запросов.
+
+- **`/backup`** — master будит агент → агент упаковывает **актуальные** файлы и загружает → собирается zip
+- **`/nodes ping nl3`** — проверка доступности agent/SSH по команде (не автоматически)
+- **`/nodes list`** — статус «online» если агент был на связи за последние 6h
 
 ---
 

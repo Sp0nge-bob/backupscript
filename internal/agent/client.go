@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,50 +17,47 @@ import (
 )
 
 type ClientConfig struct {
-	Node      string
-	MasterURL string
-	Token     string
-	Paths     []string
-	Version   string
+	Node          string
+	MasterURL     string
+	Token         string
+	Paths         []string
+	Version       string
+	ListenTimeout time.Duration
 }
 
-type HeartbeatResponse struct {
-	OK            bool `json:"ok"`
-	SyncRequired  bool `json:"sync_required"`
+type WaitResponse struct {
+	OK           bool `json:"ok"`
+	SyncRequired bool `json:"sync_required"`
 }
 
-func Heartbeat(cfg ClientConfig) (HeartbeatResponse, error) {
-	reports := make([]PathReport, 0, len(cfg.Paths))
-	for _, p := range cfg.Paths {
-		_, err := os.Stat(p)
-		reports = append(reports, PathReport{Path: p, Exists: err == nil})
+func WaitForSync(cfg ClientConfig) (WaitResponse, error) {
+	timeout := cfg.ListenTimeout
+	if timeout <= 0 {
+		timeout = 6 * time.Hour
 	}
 
-	body, err := json.Marshal(map[string]any{
-		"node":    cfg.Node,
-		"token":   cfg.Token,
-		"version": cfg.Version,
-		"paths":   reports,
-	})
-	if err != nil {
-		return HeartbeatResponse{}, err
-	}
+	base := strings.TrimRight(cfg.MasterURL, "/")
+	query := url.Values{}
+	query.Set("node", cfg.Node)
+	query.Set("token", cfg.Token)
+	query.Set("timeout", timeout.String())
+	endpoint := fmt.Sprintf("%s/api/agent/wait-sync?%s", base, query.Encode())
 
-	url := strings.TrimRight(cfg.MasterURL, "/") + "/api/agent/heartbeat"
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	client := &http.Client{Timeout: timeout + 30*time.Second}
+	resp, err := client.Get(endpoint)
 	if err != nil {
-		return HeartbeatResponse{}, err
+		return WaitResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return HeartbeatResponse{}, fmt.Errorf("heartbeat status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+		return WaitResponse{}, fmt.Errorf("wait-sync status %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 	}
 
-	var result HeartbeatResponse
+	var result WaitResponse
 	if err := json.Unmarshal(data, &result); err != nil {
-		return HeartbeatResponse{}, fmt.Errorf("parse heartbeat response: %w", err)
+		return WaitResponse{}, fmt.Errorf("parse wait-sync response: %w", err)
 	}
 	return result, nil
 }

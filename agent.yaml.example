@@ -4,5 +4,5 @@ token: "случайный-секрет-на-ноду"
 paths:
   - /etc/nginx/conf.d/
   - /etc/x-ui/x-ui.db
-poll_interval: "30s"
+listen_timeout: "6h"
 tmp_dir: "/tmp/backup-agent"

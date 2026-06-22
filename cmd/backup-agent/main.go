@@ -10,7 +10,7 @@ import (
 	"github.com/Sp0nge-bob/backupscript/internal/interval"
 )
 
-const version = "1.1.0"
+const version = "1.2.0"
 
 func main() {
 	log.SetFlags(log.LstdFlags)
@@ -25,42 +25,41 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	pollInterval, err := interval.Parse(cfg.PollInterval)
+	listenTimeout, err := interval.Parse(cfg.ListenTimeout)
 	if err != nil {
-		log.Fatalf("poll_interval: %v", err)
+		log.Fatalf("listen_timeout: %v", err)
 	}
 
 	clientCfg := agent.ClientConfig{
-		Node:      cfg.Node,
-		MasterURL: cfg.MasterURL,
-		Token:     cfg.Token,
-		Paths:     cfg.Paths,
-		Version:   version,
+		Node:          cfg.Node,
+		MasterURL:     cfg.MasterURL,
+		Token:         cfg.Token,
+		Paths:         cfg.Paths,
+		Version:       version,
+		ListenTimeout: listenTimeout,
 	}
 
-	log.Printf("backup-agent %s for node %s (poll %s)", version, cfg.Node, cfg.PollInterval)
-	runPoll(clientCfg, cfg.TmpDir)
+	log.Printf("backup-agent %s for node %s (listen %s)", version, cfg.Node, cfg.ListenTimeout)
 
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for range ticker.C {
-		runPoll(clientCfg, cfg.TmpDir)
+	for {
+		runListen(clientCfg, cfg.TmpDir)
+		time.Sleep(5 * time.Second)
 	}
 }
 
-func runPoll(cfg agent.ClientConfig, tmpDir string) {
-	resp, err := agent.Heartbeat(cfg)
+func runListen(cfg agent.ClientConfig, tmpDir string) {
+	resp, err := agent.WaitForSync(cfg)
 	if err != nil {
-		log.Printf("heartbeat failed: %v", err)
+		log.Printf("listen failed: %v", err)
 		return
 	}
 
 	if resp.SyncRequired {
-		log.Printf("master requested fresh sync")
+		log.Printf("backup requested, uploading fresh data")
 		if err := agent.Upload(cfg, tmpDir); err != nil {
-			log.Printf("sync upload failed: %v", err)
+			log.Printf("upload failed: %v", err)
 			return
 		}
-		log.Printf("sync upload ok")
+		log.Printf("upload ok")
 	}
 }

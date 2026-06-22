@@ -6,10 +6,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Sp0nge-bob/backupscript/internal/agent"
 	"github.com/Sp0nge-bob/backupscript/internal/backup"
 	"github.com/Sp0nge-bob/backupscript/internal/config"
 	"github.com/Sp0nge-bob/backupscript/internal/remote"
 )
+
+const agentOnlineWindow = 6 * time.Hour
 
 func (s *Service) handleNodes(chatID int64, args string) {
 	args = strings.TrimSpace(args)
@@ -30,6 +33,12 @@ func (s *Service) handleNodes(chatID int64, args string) {
 			return
 		}
 		s.sendNodeStatus(chatID, parts[1])
+	case "ping":
+		if len(parts) < 2 {
+			s.sendText(chatID, "Укажите ноду: /nodes ping nl3")
+			return
+		}
+		s.pingNode(chatID, parts[1])
 	case "paths":
 		if len(parts) < 2 {
 			s.sendText(chatID, "Использование: /nodes paths list nl2")
@@ -86,7 +95,37 @@ func (s *Service) handleNodePaths(chatID int64, nodeName, rest string) {
 }
 
 func (s *Service) sendNodesHelp(chatID int64) {
-	s.sendText(chatID, "Ноды (добавление ноды — в config.yaml):\n\n/nodes list\n/nodes status nl2\n/nodes paths list nl2\n/nodes paths add nl2 /etc/foo\n/nodes paths remove nl2 /etc/foo")
+	s.sendText(chatID, "Ноды (добавление ноды — в config.yaml):\n\n/nodes list\n/nodes status nl2\n/nodes ping nl3 — проверить agent-ноду\n/nodes paths list nl2\n/nodes paths add nl2 /etc/foo\n/nodes paths remove nl2 /etc/foo")
+}
+
+func (s *Service) pingNode(chatID int64, nodeName string) {
+	if s.agentReg == nil {
+		s.sendText(chatID, "Проверка agent недоступна")
+		return
+	}
+
+	node, _, err := s.cfg.FindNode(nodeName)
+	if err != nil {
+		s.sendText(chatID, "Ошибка: "+err.Error())
+		return
+	}
+
+	switch node.NormalizedMode() {
+	case config.NodeModeSSH:
+		if err := remote.Ping(node); err != nil {
+			s.sendText(chatID, fmt.Sprintf("SSH %s: offline (%v)", nodeName, err))
+			return
+		}
+		s.sendText(chatID, fmt.Sprintf("SSH %s: online", nodeName))
+	case config.NodeModeAgent:
+		if err := agent.PingAgentNode(s.cfg, s.agentReg, nodeName); err != nil {
+			s.sendText(chatID, fmt.Sprintf("Agent %s: offline (%v)", nodeName, err))
+			return
+		}
+		s.sendText(chatID, fmt.Sprintf("Agent %s: online", nodeName))
+	default:
+		s.sendText(chatID, "Неизвестный режим ноды")
+	}
 }
 
 func (s *Service) sendNodesList(chatID int64) {
@@ -95,11 +134,10 @@ func (s *Service) sendNodesList(chatID int64) {
 		return
 	}
 
-	maxAge, _ := s.cfg.Agent.MaxStagingAgeDuration()
 	var b strings.Builder
 	b.WriteString("Ноды:\n\n")
 	for _, node := range s.cfg.Nodes {
-		b.WriteString(s.formatNodeSummary(node, maxAge))
+		b.WriteString(s.formatNodeSummary(node))
 		b.WriteString("\n")
 	}
 	s.sendText(chatID, b.String())
@@ -112,11 +150,10 @@ func (s *Service) sendNodeStatus(chatID int64, nodeName string) {
 		return
 	}
 
-	maxAge, _ := s.cfg.Agent.MaxStagingAgeDuration()
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Нода: %s\n", node.Name))
 	b.WriteString(fmt.Sprintf("Режим: %s\n", node.Mode))
-	b.WriteString(s.formatNodeSummary(node, maxAge))
+	b.WriteString(s.formatNodeSummary(node))
 	b.WriteString("\nПути:\n")
 
 	switch node.NormalizedMode() {
@@ -197,7 +234,7 @@ func (s *Service) sendNodePathsList(chatID int64, nodeName string) {
 	s.sendText(chatID, b.String())
 }
 
-func (s *Service) formatNodeSummary(node config.NodeConfig, maxAge time.Duration) string {
+func (s *Service) formatNodeSummary(node config.NodeConfig) string {
 	summary := fmt.Sprintf("%s [%s] — %d путей", node.Name, node.Mode, len(node.Paths))
 	switch node.NormalizedMode() {
 	case config.NodeModeSSH:
@@ -206,10 +243,13 @@ func (s *Service) formatNodeSummary(node config.NodeConfig, maxAge time.Duration
 		}
 		return summary + ", ssh: online"
 	case config.NodeModeAgent:
-		if s.agentReg != nil && s.agentReg.IsOnline(node.Name, maxAge) {
+		if s.agentReg != nil && s.agentReg.IsOnline(node.Name, agentOnlineWindow) {
+			if s.agentReg.HasWaiter(node.Name) {
+				return summary + ", agent: online (подключён)"
+			}
 			return summary + ", agent: online"
 		}
-		return summary + ", agent: offline"
+		return summary + ", agent: offline (/nodes ping)"
 	}
 	return summary
 }

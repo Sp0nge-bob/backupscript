@@ -97,7 +97,7 @@ func (s *Service) handleCommand(msg *tgbotapi.Message) {
 	case "nodes":
 		s.handleNodes(msg.Chat.ID, strings.TrimSpace(msg.CommandArguments()))
 	case "help":
-		s.sendText(msg.Chat.ID, "Команды:\n/backup — архив и отправка\n/paths — пути master: add, remove, list\n/nodes — ноды: list, status, paths\n/schedule — автобекап: /schedule 6h, /schedule off\n/list — все настройки\n/status — последний бекап\n\n/nodes paths add nl2 /etc/foo\nИнтервал: 30m, 6h, 7d, 1w (минимум 1m).")
+		s.sendText(msg.Chat.ID, "Команды:\n/backup — архив и отправка\n/paths — пути master: add, remove, list\n/nodes — ноды: list, status, ping, paths\n/schedule — автобекап: /schedule 6h, /schedule off\n/list — все настройки\n/status — последний бекап\n\n/nodes ping nl3 — проверить agent\nИнтервал: 30m, 6h, 7d, 1w (минимум 1m).")
 	default:
 		s.sendText(msg.Chat.ID, "Неизвестная команда. /help")
 	}
@@ -331,10 +331,9 @@ func (s *Service) sendList(chatID int64) {
 	}
 
 	if len(s.cfg.Nodes) > 0 {
-		maxAge, _ := s.cfg.Agent.MaxStagingAgeDuration()
 		b.WriteString("\nНоды:\n")
 		for _, node := range s.cfg.Nodes {
-			b.WriteString(s.formatNodeSummary(node, maxAge))
+			b.WriteString(s.formatNodeSummary(node))
 			b.WriteString("\n")
 		}
 	}
