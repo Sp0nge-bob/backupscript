@@ -77,66 +77,42 @@ curl -4 -s ifconfig.me; echo
 
 На SSH-ноде нет `git clone` и сборки — только **один раз** добавить ключ master в `authorized_keys`.
 
-1. Скопируйте **весь скрипт** ниже и вставьте в терминал удалённого VPS (под root).
-2. Скрипт **сам спросит** публичный ключ и IP master — ничего заранее править не нужно.
-3. Когда увидите `Вставьте публичный ключ master:` — вставьте строку из шага 1 (`cat ...pub`).
+> **Не вставляйте многострочный скрипт в SSH построчно** — терминал часто ломает вставку. Используйте **одну команду** ниже.
+
+### Способ A (рекомендуется): одна строка
+
+На **удалённом VPS** под root — скопируйте **одну** команду и Enter:
 
 ```bash
-set -e
-
-if [ "$(id -u)" -ne 0 ]; then
-  echo "Запустите от root: sudo -i"
-  exit 1
-fi
-
-echo "=== backupscript: SSH-доступ для master ==="
-echo ""
-echo "Скопируйте на master: cat /root/.ssh/backup_nodes.pub"
-echo "Вставьте сюда одну строку (ssh-ed25519 ... или ssh-rsa ...)."
-echo ""
-read -r -p "Публичный ключ master: " MASTER_PUBKEY
-
-if [ -z "$MASTER_PUBKEY" ]; then
-  echo "Ключ не указан."
-  exit 1
-fi
-
-case "$MASTER_PUBKEY" in
-  ssh-ed25519*|ssh-rsa*)
-    ;;
-  *)
-    echo "Неверный формат. Нужна целая строка из .pub файла."
-    exit 1
-    ;;
-esac
-
-echo ""
-echo "IP master (Enter — разрешить подключение с любого IP):"
-read -r -p "IP master: " MASTER_IP
-
-mkdir -p /root/.ssh
-chmod 700 /root/.ssh
-touch /root/.ssh/authorized_keys
-chmod 600 /root/.ssh/authorized_keys
-
-if [ -n "$MASTER_IP" ]; then
-  ENTRY="from=\"${MASTER_IP}\" ${MASTER_PUBKEY}"
-else
-  ENTRY="$MASTER_PUBKEY"
-fi
-
-KEY_SIG="$(echo "$MASTER_PUBKEY" | awk '{print $1" "$2}')"
-if grep -qF "$KEY_SIG" /root/.ssh/authorized_keys 2>/dev/null; then
-  echo "Ключ master уже есть в authorized_keys."
-else
-  echo "$ENTRY" >> /root/.ssh/authorized_keys
-  echo "Ключ master добавлен."
-fi
-
-echo ""
-echo "Готово. Проверьте с master: ssh -p ПОРТ -i /root/.ssh/backup_nodes root@$(hostname -I | awk '{print $1}')"
-echo "Пример путей для бекапа: /etc/nginx/conf.d/, /etc/x-ui/x-ui.db"
+curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/backupscript/main/scripts/ssh-node-authorize.sh | bash
 ```
+
+Если нет `curl`:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/Sp0nge-bob/backupscript/main/scripts/ssh-node-authorize.sh | bash
+```
+
+Дальше скрипт спросит:
+
+1. `Публичный ключ master:` — вставьте строку с master (`cat /root/.ssh/backup_nodes.pub`)
+2. `IP master:` — IP master или Enter (без ограничения)
+
+### Способ B: скачать файл и запустить
+
+```bash
+curl -fsSL -o /tmp/ssh-node-authorize.sh https://raw.githubusercontent.com/Sp0nge-bob/backupscript/main/scripts/ssh-node-authorize.sh
+bash /tmp/ssh-node-authorize.sh
+rm -f /tmp/ssh-node-authorize.sh
+```
+
+### Проверка на ноде
+
+```bash
+grep backupscript /root/.ssh/authorized_keys
+```
+
+Должна быть строка с вашим `ssh-ed25519 ...`.
 
 > **Рекомендация:** укажите IP master при запросе — тогда ключ сработает только с этого сервера.
 
@@ -232,6 +208,7 @@ systemctl restart backup-bot
 | `No such file` в предупреждениях | Путь не существует на ноде — добавьте или уберите через `/nodes paths` |
 | Нода пропущена в архиве | Смотрите предупреждения в Telegram; проверьте `/nodes ping` |
 | Бот не стартует после правки config | В файле случайно оказалась shell-команда — удалите строки `systemctl`, `nano` и т.п. |
+| Скрипт на ноде «развалился» при вставке | Не копируйте многострочный bash в SSH — используйте `curl ... \| bash` (шаг 2, способ A) |
 
 ---
 
