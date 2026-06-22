@@ -1,8 +1,21 @@
 # SSH-нода
 
-В режиме **SSH** master сам подключается к удалённому VPS и забирает файлы по SFTP. На ноде **не нужно** ставить backup-agent — только настроить SSH-доступ.
+В режиме **SSH** master сам подключается к удалённому VPS и забирает файлы по SFTP.
 
-Подходит, если master может достучаться до ноды по SSH (порт 22 или другой).
+Подходит, если master может достучаться до ноды по SSH.
+
+---
+
+## SSH или Agent?
+
+| | SSH-нода | Agent-нода |
+|---|----------|------------|
+| Софт на удалённом VPS | **Ничего не ставится** | `backup-agent` + systemd |
+| Софт на master | `backup-bot` | `backup-bot` + порт 9876 |
+| Как передаются файлы | Master забирает по SSH/SFTP | Нода сама отправляет на master |
+| Гайд | этот файл | [install-agent-node.md](install-agent-node.md) |
+
+> **backup-agent на SSH-ноде не нужен и не ставится.** Если нужен агент — используйте режим `agent`, не `ssh`.
 
 ---
 
@@ -54,7 +67,9 @@ echo "=========================================================="
 
 ---
 
-## Шаг 2. Подготовка удалённой ноды
+## Шаг 2. Установка на удалённой ноде
+
+На SSH-ноде нет `git clone` и сборки — только **один раз** добавить ключ master в `authorized_keys`.
 
 Скопируйте и вставьте **на удалённом VPS** (под root):
 
@@ -109,13 +124,20 @@ echo "Пример путей: /etc/nginx/conf.d/, /etc/x-ui/x-ui.db"
 
 ## Шаг 3. Проверка с master
 
-На **master** (подставьте IP и пользователя ноды):
+На **master** (подставьте IP, порт и пользователя ноды):
 
 ```bash
-ssh -i /root/.ssh/backup_nodes -o StrictHostKeyChecking=accept-new root@203.0.113.10 "ls /etc/nginx/conf.d/"
+# Стандартный порт 22:
+ssh -i /root/.ssh/backup_nodes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+  root@203.0.113.10 "ls /etc/nginx/conf.d/"
+
+# Нестандартный порт (например 2222) — обязательно -p:
+ssh -p 2222 -i /root/.ssh/backup_nodes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+  root@203.0.113.10 "ls /etc/nginx/conf.d/"
 ```
 
-Если команда выполнилась без пароля — SSH настроен.
+Если команда выполнилась без пароля — SSH настроен.  
+Если **висит без ответа** — проверьте порт (`-p`) и firewall на ноде.
 
 ---
 
@@ -135,7 +157,7 @@ nodes:
   - name: "nl2"
     mode: "ssh"
     host: "203.0.113.10"
-    port: 22
+    port: 2222          # ваш SSH-порт; если 22 — можно не менять
     user: "root"
     key_file: "/root/.ssh/backup_nodes"
     paths:
@@ -147,7 +169,7 @@ nodes:
 |------|----------|
 | `name` | Имя папки в zip (`nl2/...`) |
 | `host` | IP или домен ноды |
-| `port` | SSH-порт (обычно 22) |
+| `port` | SSH-порт ноды (**обязательно**, если не 22) |
 | `user` | Пользователь SSH |
 | `key_file` | Приватный ключ на master |
 | `paths` | Что забирать с ноды |
@@ -175,6 +197,7 @@ nodes:
 
 | Симптом | Решение |
 |---------|---------|
+| Команда **висит** без ошибки | Неверный порт — добавьте `-p` в ssh и `port:` в config.yaml; проверьте firewall |
 | `Permission denied (publickey)` | Проверьте `authorized_keys` на ноде, права `600` на файл и `700` на `.ssh` |
 | `Connection refused` | Откройте порт SSH в firewall ноды, проверьте `host` и `port` |
 | `No such file` в предупреждениях | Путь не существует на ноде — добавьте или уберите через `/nodes paths` |
