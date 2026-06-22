@@ -26,11 +26,50 @@
 ## Требования
 
 - Linux (VPS)
-- Go 1.22+ (только для сборки)
+- Go 1.22+ (только для сборки; после сборки можно удалить)
 - Telegram-бот ([@BotFather](https://t.me/BotFather))
 - Доступ к файлам бекапа (часто нужен `root` для `/etc/nginx`, `/etc/x-ui`)
 
-## Установка
+## Установка Go
+
+Go нужен только чтобы собрать бинарник. На сервере без `go` в PATH сначала установите его.
+
+### Способ 1 — официальный архив (рекомендуется)
+
+Подходит для Ubuntu, Debian и других дистрибутивов. Версия из репозитория дистрибутива часто слишком старая.
+
+```bash
+GO_VERSION=1.22.5
+
+# amd64 (большинство VPS)
+wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
+tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
+rm go${GO_VERSION}.linux-amd64.tar.gz
+
+# для ARM64 (например Oracle Ampere) вместо amd64:
+# wget https://go.dev/dl/go${GO_VERSION}.linux-arm64.tar.gz
+# tar -C /usr/local -xzf go${GO_VERSION}.linux-arm64.tar.gz
+
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+source ~/.bashrc
+
+go version
+```
+
+Должно вывести `go version go1.22.5 linux/amd64` (или вашу архитектуру).
+
+### Способ 2 — через apt (Ubuntu / Debian)
+
+Быстрее, но проверьте версию — нужна **1.22 или новее**:
+
+```bash
+apt update && apt install -y golang-go
+go version
+```
+
+Если версия ниже 1.22, используйте способ 1.
+
+## Установка бота
 
 ```bash
 git clone https://github.com/Sp0nge-bob/backupscript.git /opt/backup-bot
