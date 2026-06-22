@@ -25,93 +25,99 @@
 
 ## Требования
 
-- Linux (VPS)
-- Go 1.22+ (только для сборки; после сборки можно удалить)
+- Linux (VPS), root
 - Telegram-бот ([@BotFather](https://t.me/BotFather))
-- Доступ к файлам бекапа (часто нужен `root` для `/etc/nginx`, `/etc/x-ui`)
+- Ваш Telegram user ID ([@userinfobot](https://t.me/userinfobot))
+- Go ставится скриптом автоматически (нужен только для сборки)
 
-## Установка Go
+## Быстрая установка
 
-Go нужен только чтобы собрать бинарник. На сервере без `go` в PATH сначала установите его.
-
-### Способ 1 — официальный архив (рекомендуется)
-
-Подходит для Ubuntu, Debian и других дистрибутивов. Версия из репозитория дистрибутива часто слишком старая.
-
-Скопируйте блок **целиком**. Если выполнять команды по одной — сначала задайте версию: `export GO_VERSION=1.22.5`, иначе `wget` скачает несуществующий `go.linux-amd64.tar.gz` (404).
+1. Замените `ВАШ_ТОКЕН` и `ВАШ_USER_ID` в блоке ниже.
+2. Скопируйте **весь блок целиком** и вставьте в терминал на сервере.
 
 ```bash
-export GO_VERSION=1.22.5
+set -e
 
-# amd64 (большинство VPS)
-wget "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
-tar -C /usr/local -xzf "go${GO_VERSION}.linux-amd64.tar.gz"
-rm "go${GO_VERSION}.linux-amd64.tar.gz"
+# ========== НАСТРОЙТЕ ==========
+TELEGRAM_BOT_TOKEN="ВАШ_ТОКЕН"
+ALLOWED_USER_IDS="ВАШ_USER_ID"
+# ================================
 
-# для ARM64 (например Oracle Ampere) вместо amd64:
-# wget "https://go.dev/dl/go${GO_VERSION}.linux-arm64.tar.gz"
-# tar -C /usr/local -xzf "go${GO_VERSION}.linux-arm64.tar.gz"
-# rm "go${GO_VERSION}.linux-arm64.tar.gz"
+INSTALL_DIR="/opt/backup-bot"
+GO_VERSION="1.22.5"
 
-echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
-source ~/.bashrc
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Запустите от root: sudo -i"
+  exit 1
+fi
 
+if [ "$TELEGRAM_BOT_TOKEN" = "ВАШ_ТОКЕН" ] || [ "$ALLOWED_USER_IDS" = "ВАШ_USER_ID" ]; then
+  echo "Укажите TELEGRAM_BOT_TOKEN и ALLOWED_USER_IDS в начале скрипта"
+  exit 1
+fi
+
+if ! command -v go >/dev/null 2>&1; then
+  echo "Устанавливаю Go ${GO_VERSION}..."
+  case "$(uname -m)" in
+    x86_64)  GO_ARCH="amd64" ;;
+    aarch64) GO_ARCH="arm64" ;;
+    *) echo "Неподдерживаемая архитектура: $(uname -m)"; exit 1 ;;
+  esac
+  wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" -O /tmp/go.tar.gz
+  rm -rf /usr/local/go
+  tar -C /usr/local -xzf /tmp/go.tar.gz
+  rm /tmp/go.tar.gz
+  export PATH="/usr/local/go/bin:$PATH"
+  grep -q '/usr/local/go/bin' /root/.bashrc 2>/dev/null || echo 'export PATH=$PATH:/usr/local/go/bin' >> /root/.bashrc
+fi
+
+export PATH="/usr/local/go/bin:$PATH"
 go version
-```
 
-Должно вывести `go version go1.22.5 linux/amd64` (или вашу архитектуру).
+if [ -d "$INSTALL_DIR/.git" ]; then
+  echo "Обновляю репозиторий..."
+  git -C "$INSTALL_DIR" pull
+else
+  echo "Клонирую репозиторий..."
+  git clone https://github.com/Sp0nge-bob/backupscript.git "$INSTALL_DIR"
+fi
 
-Либо без переменных — прямая ссылка:
-
-```bash
-wget https://go.dev/dl/go1.22.5.linux-amd64.tar.gz
-tar -C /usr/local -xzf go1.22.5.linux-amd64.tar.gz
-rm go1.22.5.linux-amd64.tar.gz
-echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
-source ~/.bashrc
-go version
-```
-
-### Способ 2 — через apt (Ubuntu / Debian)
-
-Быстрее, но проверьте версию — нужна **1.22 или новее**:
-
-```bash
-apt update && apt install -y golang-go
-go version
-```
-
-Если версия ниже 1.22, используйте способ 1.
-
-## Установка бота
-
-```bash
-git clone https://github.com/Sp0nge-bob/backupscript.git /opt/backup-bot
-cd /opt/backup-bot
-
+cd "$INSTALL_DIR"
 go build -ldflags="-s -w" -o backup-bot ./cmd/backup-bot
 
-cp config.yaml.example config.yaml
-cp .env.example .env
-```
+if [ ! -f config.yaml ]; then
+  cp config.yaml.example config.yaml
+fi
 
-### Настройка `.env`
-
-```env
-TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
-ALLOWED_USER_IDS=123456789
-CONFIG_PATH=/opt/backup-bot/config.yaml
+cat > .env <<EOF
+TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+ALLOWED_USER_IDS=${ALLOWED_USER_IDS}
+CONFIG_PATH=${INSTALL_DIR}/config.yaml
 BACKUP_TMP_DIR=/tmp/backup-bot
+EOF
+chmod 600 .env
+
+cp backup-bot.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable backup-bot
+systemctl restart backup-bot
+
+echo ""
+echo "Готово. Статус:"
+systemctl --no-pager status backup-bot
+echo ""
+echo "Логи: journalctl -u backup-bot -f"
+echo "Пути бекапа: nano ${INSTALL_DIR}/config.yaml"
 ```
 
-- Токен — от [@BotFather](https://t.me/BotFather)
-- User ID — от [@userinfobot](https://t.me/userinfobot), можно несколько через запятую
+После установки при необходимости отредактируйте пути бекапа:
 
 ```bash
-chmod 600 .env
+nano /opt/backup-bot/config.yaml
+systemctl restart backup-bot
 ```
 
-### Настройка `config.yaml`
+Пример `config.yaml` (уже создаётся из `config.yaml.example`):
 
 ```yaml
 backup:
@@ -126,34 +132,29 @@ backup:
 
 schedule:
   enabled: true
-  cron: "0 3 * * *"        # каждый день в 03:00
-  notify_chat_id: null     # null = первый ID из ALLOWED_USER_IDS
+  cron: "0 3 * * *"
+  notify_chat_id: null
 ```
 
-Добавляйте и убирайте пути в `paths` по необходимости.
+## Обновление
 
-## Запуск через systemd
+Скопируйте и вставьте:
 
 ```bash
-cp backup-bot.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now backup-bot
-systemctl status backup-bot
+set -e
+cd /opt/backup-bot
+export PATH="/usr/local/go/bin:$PATH"
+git pull
+go build -ldflags="-s -w" -o backup-bot ./cmd/backup-bot
+systemctl restart backup-bot
+systemctl --no-pager status backup-bot
 ```
 
-Логи:
+## Логи
 
 ```bash
 journalctl -u backup-bot -f
 ```
-
-## Сборка
-
-```bash
-make build
-```
-
-Бинарник появится как `./backup-bot`.
 
 ## Ограничения
 
