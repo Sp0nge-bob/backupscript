@@ -2,16 +2,15 @@ package agent
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/Sp0nge-bob/backupscript/internal/config"
 )
 
-func SyncAgentNodes(cfg *config.Config, registry *Registry) ([]string, error) {
+func SyncAgentNodes(cfg *config.Config, registry *Registry) (failed []string, warnings []string, err error) {
 	timeout, err := cfg.Agent.SyncTimeoutDuration()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var agentNodes []config.NodeConfig
@@ -21,25 +20,25 @@ func SyncAgentNodes(cfg *config.Config, registry *Registry) ([]string, error) {
 		}
 	}
 	if len(agentNodes) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	var warnings []string
 	for _, node := range agentNodes {
 		if !registry.HasWaiter(node.Name) {
-			warnings = append(warnings, fmt.Sprintf("%s: агент не подключён (нет активного канала)", node.Name))
+			msg := fmt.Sprintf("%s: агент не подключён — нода пропущена", node.Name)
+			warnings = append(warnings, msg)
+			failed = append(failed, node.Name)
 			continue
 		}
 		since := registry.RequestSync(node.Name)
 		if err := registry.WaitForFreshUpload(node.Name, since, timeout); err != nil {
-			warnings = append(warnings, fmt.Sprintf("%s: %v", node.Name, err))
+			msg := fmt.Sprintf("%s: %v — нода пропущена", node.Name, err)
+			warnings = append(warnings, msg)
+			failed = append(failed, node.Name)
 		}
 	}
 
-	if len(warnings) == len(agentNodes) {
-		return warnings, fmt.Errorf("ни одна agent-нода не синхронизировалась: %s", strings.Join(warnings, "; "))
-	}
-	return warnings, nil
+	return failed, warnings, nil
 }
 
 func PingAgentNode(cfg *config.Config, registry *Registry, nodeName string) error {

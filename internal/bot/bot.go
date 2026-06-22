@@ -173,11 +173,15 @@ func (s *Service) hasAgentNodes() bool {
 
 func (s *Service) CreateBackup() (*backup.Result, error) {
 	var syncWarnings []string
+	skipNodes := make(map[string]bool)
 	if s.agentReg != nil && s.hasAgentNodes() {
-		warns, err := agent.SyncAgentNodes(s.cfg, s.agentReg)
+		failed, warns, err := agent.SyncAgentNodes(s.cfg, s.agentReg)
 		syncWarnings = warns
 		if err != nil {
 			return nil, err
+		}
+		for _, name := range failed {
+			skipNodes[name] = true
 		}
 	}
 
@@ -192,6 +196,7 @@ func (s *Service) CreateBackup() (*backup.Result, error) {
 		Exclude:       s.cfg.Backup.Exclude,
 		TmpDir:        s.cfg.TmpDir,
 		Nodes:         s.cfg.Nodes,
+		SkipNodes:     skipNodes,
 		MaxStagingAge: maxStagingAge,
 		StagingDir:    s.cfg.StagingDir,
 		StagingStaleWarn: func(nodeName string) string {

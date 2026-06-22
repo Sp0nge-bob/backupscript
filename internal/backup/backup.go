@@ -18,14 +18,15 @@ const MaxTelegramFileSize = 50 * 1024 * 1024
 const LocalPrefix = "local"
 
 type Config struct {
-	Name              string
-	Paths             []string
-	Exclude           []string
-	TmpDir            string
-	Nodes             []config.NodeConfig
-	StagingDir        func(string) string
-	MaxStagingAge     time.Duration
-	StagingStaleWarn  func(string) string
+	Name             string
+	Paths            []string
+	Exclude          []string
+	TmpDir           string
+	Nodes            []config.NodeConfig
+	SkipNodes        map[string]bool
+	StagingDir       func(string) string
+	MaxStagingAge    time.Duration
+	StagingStaleWarn func(string) string
 }
 
 type PathStatus struct {
@@ -136,11 +137,15 @@ func Create(cfg Config) (*Result, error) {
 }
 
 func addNodeSources(zw *zip.Writer, node config.NodeConfig, cfg Config) (warnings []string, count int, err error) {
+	if cfg.SkipNodes != nil && cfg.SkipNodes[node.Name] {
+		return nil, 0, nil
+	}
+
 	switch node.NormalizedMode() {
 	case config.NodeModeSSH:
 		client, connErr := remote.Connect(node)
 		if connErr != nil {
-			return nil, 0, fmt.Errorf("ssh connect failed: %w", connErr)
+			return []string{prefixWarning(node.Name, fmt.Sprintf("ssh недоступна: %v — нода пропущена", connErr))}, 0, nil
 		}
 		defer client.Close()
 		warns, added, addErr := client.AddToZip(zw, node.Paths, cfg.Exclude, node.Name, cfg.TmpDir)
