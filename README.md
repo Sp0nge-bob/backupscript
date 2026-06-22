@@ -20,7 +20,7 @@
 |---------|----------|
 | `/backup` | Создать архив и отправить |
 | `/paths` | Пути **master**: add / remove / list |
-| `/nodes` | Удалённые ноды: list / status / paths |
+| `/nodes` | Удалённые ноды: list / status / ping / paths |
 | `/schedule` | Интервал автобекапа: `30m`, `6h`, `7d` |
 | `/list` | Все настройки |
 | `/status` | Последний бекап |
