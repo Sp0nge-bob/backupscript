@@ -28,9 +28,11 @@ func main() {
 
 	svc := bot.New(api, cfg)
 
-	if _, err := scheduler.Start(cfg, svc); err != nil {
+	sched, err := scheduler.Start(cfg, svc)
+	if err != nil {
 		log.Fatalf("scheduler: %v", err)
 	}
+	svc.SetScheduler(sched)
 
 	go func() {
 		sigCh := make(chan os.Signal, 1)

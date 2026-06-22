@@ -12,6 +12,8 @@ import (
 
 	"github.com/Sp0nge-bob/backupscript/internal/backup"
 	"github.com/Sp0nge-bob/backupscript/internal/config"
+	"github.com/Sp0nge-bob/backupscript/internal/interval"
+	"github.com/Sp0nge-bob/backupscript/internal/scheduler"
 )
 
 type LastBackup struct {
@@ -25,12 +27,17 @@ type LastBackup struct {
 type Service struct {
 	api        *tgbotapi.BotAPI
 	cfg        *config.Config
+	sched      *scheduler.Manager
 	mu         sync.RWMutex
 	lastBackup LastBackup
 }
 
 func New(api *tgbotapi.BotAPI, cfg *config.Config) *Service {
 	return &Service{api: api, cfg: cfg}
+}
+
+func (s *Service) SetScheduler(sched *scheduler.Manager) {
+	s.sched = sched
 }
 
 func (s *Service) Run() {
@@ -60,7 +67,7 @@ func (s *Service) handleCommand(msg *tgbotapi.Message) {
 
 	switch msg.Command() {
 	case "start":
-		text := "Бот бекапов сервера.\n\nКоманды:\n/backup — создать и отправить архив\n/list — пути из конфига\n/status — статус\n/help — справка"
+		text := "Бот бекапов сервера.\n\nКоманды:\n/backup — создать и отправить архив\n/schedule — интервал автобекапа (30m, 6h, 7d)\n/list — пути из конфига\n/status — статус\n/help — справка"
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("Сделать бекап", "backup"),
@@ -77,8 +84,10 @@ func (s *Service) handleCommand(msg *tgbotapi.Message) {
 		s.sendList(msg.Chat.ID)
 	case "status":
 		s.sendStatus(msg.Chat.ID)
+	case "schedule":
+		s.handleSchedule(msg.Chat.ID, strings.TrimSpace(msg.CommandArguments()))
 	case "help":
-		s.sendText(msg.Chat.ID, "Команды:\n/backup — архив и отправка\n/list — пути и их наличие\n/status — последний бекап и расписание\n\nПути задаются в config.yaml.")
+		s.sendText(msg.Chat.ID, "Команды:\n/backup — архив и отправка\n/schedule — автобекап: /schedule 6h, /schedule off\n/list — пути и их наличие\n/status — последний бекап и расписание\n\nИнтервал: 30m, 6h, 7d, 1w (минимум 1m).\nПути задаются в config.yaml.")
 	default:
 		s.sendText(msg.Chat.ID, "Неизвестная команда. /help")
 	}
@@ -198,6 +207,55 @@ func (s *Service) sendList(chatID int64) {
 	s.sendText(chatID, b.String())
 }
 
+func (s *Service) handleSchedule(chatID int64, arg string) {
+	arg = strings.TrimSpace(strings.ToLower(arg))
+
+	if arg == "" {
+		s.sendText(chatID, fmt.Sprintf(
+			"Автобекап: %s\n\nЗадать интервал:\n/schedule 30m\n/schedule 6h\n/schedule 7d\n\nВыключить: /schedule off\nВключить с текущим интервалом: /schedule on",
+			s.cfg.Schedule.ScheduleDescription(),
+		))
+		return
+	}
+
+	schedule := s.cfg.Schedule
+
+	switch arg {
+	case "off":
+		schedule.Enabled = false
+	case "on":
+		if !schedule.UsesInterval() && schedule.Cron == "" {
+			s.sendText(chatID, "Сначала задайте интервал: /schedule 6h")
+			return
+		}
+		schedule.Enabled = true
+	default:
+		if _, err := interval.Parse(arg); err != nil {
+			s.sendText(chatID, "Ошибка: "+err.Error())
+			return
+		}
+		schedule.Interval = arg
+		schedule.Enabled = true
+	}
+
+	if err := s.cfg.SaveSchedule(schedule); err != nil {
+		s.sendText(chatID, "Не удалось сохранить config.yaml: "+err.Error())
+		return
+	}
+
+	if s.sched == nil {
+		s.sendText(chatID, "Сохранено. Перезапустите бота для применения.")
+		return
+	}
+
+	if err := s.sched.Reload(s.cfg); err != nil {
+		s.sendText(chatID, "Сохранено, но перезапуск расписания не удался: "+err.Error())
+		return
+	}
+
+	s.sendText(chatID, fmt.Sprintf("Автобекап: %s", schedule.ScheduleDescription()))
+}
+
 func (s *Service) sendStatus(chatID int64) {
 	s.mu.RLock()
 	last := s.lastBackup
@@ -205,12 +263,7 @@ func (s *Service) sendStatus(chatID int64) {
 
 	var b strings.Builder
 	b.WriteString("Статус бота\n\n")
-
-	if s.cfg.Schedule.Enabled {
-		b.WriteString(fmt.Sprintf("Расписание: включено (%s)\n", s.cfg.Schedule.Cron))
-	} else {
-		b.WriteString("Расписание: выключено\n")
-	}
+	b.WriteString(fmt.Sprintf("Автобекап: %s\n", s.cfg.Schedule.ScheduleDescription()))
 
 	if last.Time.IsZero() {
 		b.WriteString("Последний бекап: ещё не выполнялся\n")

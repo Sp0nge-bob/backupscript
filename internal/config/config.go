@@ -18,6 +18,7 @@ type BackupConfig struct {
 
 type ScheduleConfig struct {
 	Enabled      bool   `yaml:"enabled"`
+	Interval     string `yaml:"interval"`
 	Cron         string `yaml:"cron"`
 	NotifyChatID *int64 `yaml:"notify_chat_id"`
 }
@@ -117,4 +118,46 @@ func (c *Config) DefaultNotifyChatID() int64 {
 
 func (c *Config) IsAllowed(userID int64) bool {
 	return c.AllowedUserIDs[userID]
+}
+
+func (s ScheduleConfig) UsesInterval() bool {
+	return strings.TrimSpace(s.Interval) != ""
+}
+
+func (s ScheduleConfig) ScheduleDescription() string {
+	if !s.Enabled {
+		return "выключено"
+	}
+	if s.UsesInterval() {
+		return "каждые " + strings.TrimSpace(s.Interval)
+	}
+	if strings.TrimSpace(s.Cron) != "" {
+		return "cron: " + strings.TrimSpace(s.Cron)
+	}
+	return "не настроено"
+}
+
+func (c *Config) SaveSchedule(schedule ScheduleConfig) error {
+	data, err := os.ReadFile(c.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("read config %s: %w", c.ConfigPath, err)
+	}
+
+	var yamlCfg YAMLConfig
+	if err := yaml.Unmarshal(data, &yamlCfg); err != nil {
+		return fmt.Errorf("parse config: %w", err)
+	}
+
+	yamlCfg.Schedule = schedule
+	out, err := yaml.Marshal(&yamlCfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(c.ConfigPath, out, 0o644); err != nil {
+		return fmt.Errorf("write config %s: %w", c.ConfigPath, err)
+	}
+
+	c.Schedule = schedule
+	return nil
 }

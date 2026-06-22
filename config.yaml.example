@@ -10,5 +10,5 @@ backup:
 
 schedule:
   enabled: true
-  cron: "0 3 * * *"
+  interval: "24h"
   notify_chat_id: null
