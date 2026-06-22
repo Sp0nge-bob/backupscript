@@ -67,7 +67,7 @@ func (s *Service) handleCommand(msg *tgbotapi.Message) {
 
 	switch msg.Command() {
 	case "start":
-		text := "Бот бекапов сервера.\n\nКоманды:\n/backup — создать и отправить архив\n/schedule — интервал автобекапа (30m, 6h, 7d)\n/list — пути из конфига\n/status — статус\n/help — справка"
+		text := "Бот бекапов сервера.\n\nКоманды:\n/backup — создать и отправить архив\n/schedule — интервал автобекапа (30m, 6h, 7d)\n/list — пути и расписание\n/status — статус\n/help — справка"
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("Сделать бекап", "backup"),
@@ -87,7 +87,7 @@ func (s *Service) handleCommand(msg *tgbotapi.Message) {
 	case "schedule":
 		s.handleSchedule(msg.Chat.ID, strings.TrimSpace(msg.CommandArguments()))
 	case "help":
-		s.sendText(msg.Chat.ID, "Команды:\n/backup — архив и отправка\n/schedule — автобекап: /schedule 6h, /schedule off\n/list — пути и их наличие\n/status — последний бекап и расписание\n\nИнтервал: 30m, 6h, 7d, 1w (минимум 1m).\nПути задаются в config.yaml.")
+		s.sendText(msg.Chat.ID, "Команды:\n/backup — архив и отправка\n/schedule — автобекап: /schedule 6h, /schedule off\n/list — пути бекапа и интервал\n/status — последний бекап\n/help — эта справка\n\nИнтервал: 30m, 6h, 7d, 1w (минимум 1m).\nПути задаются в config.yaml.")
 	default:
 		s.sendText(msg.Chat.ID, "Неизвестная команда. /help")
 	}
@@ -194,7 +194,9 @@ func (s *Service) SendBackupTo(chatID int64) error {
 func (s *Service) sendList(chatID int64) {
 	statuses := backup.InspectPaths(s.cfg.Backup.Paths)
 	var b strings.Builder
-	b.WriteString("Пути из config.yaml:\n\n")
+	b.WriteString("Настройки из config.yaml:\n\n")
+	b.WriteString(fmt.Sprintf("Автобекап: %s\n\n", s.cfg.Schedule.ScheduleDescription()))
+	b.WriteString("Пути бекапа:\n")
 	for _, st := range statuses {
 		state := "ok"
 		if !st.Exists {
