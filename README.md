@@ -38,17 +38,20 @@ Go нужен только чтобы собрать бинарник. На се
 
 Подходит для Ubuntu, Debian и других дистрибутивов. Версия из репозитория дистрибутива часто слишком старая.
 
+Скопируйте блок **целиком**. Если выполнять команды по одной — сначала задайте версию: `export GO_VERSION=1.22.5`, иначе `wget` скачает несуществующий `go.linux-amd64.tar.gz` (404).
+
 ```bash
-GO_VERSION=1.22.5
+export GO_VERSION=1.22.5
 
 # amd64 (большинство VPS)
-wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
-tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
-rm go${GO_VERSION}.linux-amd64.tar.gz
+wget "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
+tar -C /usr/local -xzf "go${GO_VERSION}.linux-amd64.tar.gz"
+rm "go${GO_VERSION}.linux-amd64.tar.gz"
 
 # для ARM64 (например Oracle Ampere) вместо amd64:
-# wget https://go.dev/dl/go${GO_VERSION}.linux-arm64.tar.gz
-# tar -C /usr/local -xzf go${GO_VERSION}.linux-arm64.tar.gz
+# wget "https://go.dev/dl/go${GO_VERSION}.linux-arm64.tar.gz"
+# tar -C /usr/local -xzf "go${GO_VERSION}.linux-arm64.tar.gz"
+# rm "go${GO_VERSION}.linux-arm64.tar.gz"
 
 echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
 source ~/.bashrc
@@ -57,6 +60,17 @@ go version
 ```
 
 Должно вывести `go version go1.22.5 linux/amd64` (или вашу архитектуру).
+
+Либо без переменных — прямая ссылка:
+
+```bash
+wget https://go.dev/dl/go1.22.5.linux-amd64.tar.gz
+tar -C /usr/local -xzf go1.22.5.linux-amd64.tar.gz
+rm go1.22.5.linux-amd64.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+source ~/.bashrc
+go version
+```
 
 ### Способ 2 — через apt (Ubuntu / Debian)
 
