@@ -87,6 +87,8 @@ curl -4 -s ifconfig.me; echo
 curl -fsSL https://raw.githubusercontent.com/Sp0nge-bob/backupscript/main/scripts/ssh-node-authorize.sh | bash
 ```
 
+> При `curl | bash` ввод идёт с `/dev/tty` — когда спросит ключ, вставьте строку и Enter.
+
 Если нет `curl`:
 
 ```bash

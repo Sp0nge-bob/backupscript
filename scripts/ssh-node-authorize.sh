@@ -11,7 +11,7 @@ echo ""
 echo "На master: cat /root/.ssh/backup_nodes.pub"
 echo "Вставьте одну строку (ssh-ed25519 ... или ssh-rsa ...)."
 echo ""
-read -r -p "Публичный ключ master: " MASTER_PUBKEY
+read -r -p "Публичный ключ master: " MASTER_PUBKEY </dev/tty
 
 if [ -z "$MASTER_PUBKEY" ]; then
 	echo "Ключ не указан."
@@ -28,7 +28,7 @@ esac
 
 echo ""
 echo "IP master (Enter — разрешить с любого IP):"
-read -r -p "IP master: " MASTER_IP
+read -r -p "IP master: " MASTER_IP </dev/tty
 
 mkdir -p /root/.ssh
 chmod 700 /root/.ssh
