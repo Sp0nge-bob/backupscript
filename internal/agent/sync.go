@@ -41,6 +41,30 @@ func SyncAgentNodes(cfg *config.Config, registry *Registry) (failed []string, wa
 	return failed, warnings, nil
 }
 
+func SyncAgentNode(cfg *config.Config, registry *Registry, nodeName string) error {
+	node, _, err := cfg.FindNode(nodeName)
+	if err != nil {
+		return err
+	}
+	if node.NormalizedMode() != config.NodeModeAgent {
+		return nil
+	}
+
+	timeout, err := cfg.Agent.SyncTimeoutDuration()
+	if err != nil {
+		return err
+	}
+
+	if !registry.HasWaiter(node.Name) {
+		return fmt.Errorf("агент не подключён")
+	}
+	since := registry.RequestSync(node.Name)
+	if err := registry.WaitForFreshUpload(node.Name, since, timeout); err != nil {
+		return err
+	}
+	return nil
+}
+
 func PingAgentNode(cfg *config.Config, registry *Registry, nodeName string) error {
 	node, _, err := cfg.FindNode(nodeName)
 	if err != nil {

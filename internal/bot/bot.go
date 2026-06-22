@@ -73,7 +73,7 @@ func (s *Service) handleCommand(msg *tgbotapi.Message) {
 
 	switch msg.Command() {
 	case "start":
-		text := "Бот бекапов сервера.\n\nКоманды:\n/backup — создать и отправить архив\n/paths — пути master (add/remove)\n/nodes — удалённые ноды\n/schedule — интервал автобекапа\n/list — все настройки\n/status — статус\n/help — справка"
+		text := "Бот бекапов сервера.\n\nКоманды:\n/backup — все серверы\n/backup local — только master\n/backup nl2 — одна нода\n/paths — пути master (add/remove)\n/nodes — удалённые ноды\n/schedule — интервал автобекапа\n/list — все настройки\n/status — статус\n/help — справка"
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("Сделать бекап", "backup"),
@@ -85,7 +85,7 @@ func (s *Service) handleCommand(msg *tgbotapi.Message) {
 			log.Printf("send start: %v", err)
 		}
 	case "backup":
-		s.runBackup(msg.Chat.ID, msg.From.ID)
+		s.handleBackup(msg.Chat.ID, msg.From.ID, strings.TrimSpace(msg.CommandArguments()))
 	case "list":
 		s.sendList(msg.Chat.ID)
 	case "status":
@@ -97,7 +97,7 @@ func (s *Service) handleCommand(msg *tgbotapi.Message) {
 	case "nodes":
 		s.handleNodes(msg.Chat.ID, strings.TrimSpace(msg.CommandArguments()))
 	case "help":
-		s.sendText(msg.Chat.ID, "Команды:\n/backup — архив и отправка\n/paths — пути master: add, remove, list\n/nodes — ноды: list, status, ping, paths\n/schedule — автобекап: /schedule 6h, /schedule off\n/list — все настройки\n/status — последний бекап\n\n/nodes ping nl3 — проверить agent\nИнтервал: 30m, 6h, 7d, 1w (минимум 1m).")
+		s.sendText(msg.Chat.ID, "Команды:\n/backup — все серверы\n/backup local — только master\n/backup nl2 — одна нода\n/paths — пути master: add, remove, list\n/nodes — ноды: list, status, ping, paths\n/schedule — автобекап: /schedule 6h, /schedule off\n/list — все настройки\n/status — последний бекап\n\n/nodes ping nl3 — проверить agent\nИнтервал: 30m, 6h, 7d, 1w (минимум 1m).")
 	default:
 		s.sendText(msg.Chat.ID, "Неизвестная команда. /help")
 	}
@@ -113,20 +113,58 @@ func (s *Service) handleCallback(cb *tgbotapi.CallbackQuery) {
 
 	if cb.Data == "backup" {
 		_, _ = s.api.Request(callback)
-		s.runBackup(cb.Message.Chat.ID, cb.From.ID)
+		s.handleBackup(cb.Message.Chat.ID, cb.From.ID, "")
 		return
 	}
 
 	_, _ = s.api.Request(callback)
 }
 
-func (s *Service) runBackup(chatID, userID int64) {
-	s.sendText(chatID, "Создаю бекап...")
-	if s.hasAgentNodes() {
+type backupScope struct {
+	includeLocal bool
+	nodeNames    []string
+	label        string
+	strict       bool
+}
+
+func parseBackupScope(cfg *config.Config, arg string) (backupScope, error) {
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return backupScope{includeLocal: true, nodeNames: nil, label: "", strict: false}, nil
+	}
+	lower := strings.ToLower(arg)
+	if lower == "local" || lower == "master" {
+		return backupScope{includeLocal: true, nodeNames: []string{}, label: "local", strict: true}, nil
+	}
+	if _, _, err := cfg.FindNode(arg); err != nil {
+		return backupScope{}, fmt.Errorf("нода %q не найдена — /nodes list", arg)
+	}
+	return backupScope{includeLocal: false, nodeNames: []string{arg}, label: arg, strict: true}, nil
+}
+
+func (s *Service) handleBackup(chatID, userID int64, arg string) {
+	scope, err := parseBackupScope(s.cfg, arg)
+	if err != nil {
+		s.sendText(chatID, err.Error())
+		return
+	}
+	s.runBackup(chatID, userID, scope)
+}
+
+func (s *Service) runBackup(chatID, userID int64, scope backupScope) {
+	target := "все серверы"
+	if scope.label == "local" {
+		target = "master (local)"
+	} else if scope.label != "" {
+		target = "нода " + scope.label
+	}
+	s.sendText(chatID, fmt.Sprintf("Создаю бекап: %s...", target))
+
+	if s.needsAgentSync(scope) {
 		s.sendText(chatID, "Запрашиваю свежие данные с agent-нод...")
 	}
 
-	result, err := s.CreateBackup()
+	result, err := s.CreateBackup(scope)
 	if err != nil {
 		s.setLastBackup(LastBackup{Time: time.Now(), Success: false, Error: err.Error()})
 		s.sendText(chatID, "Ошибка: "+err.Error())
@@ -139,7 +177,7 @@ func (s *Service) runBackup(chatID, userID int64) {
 		}
 	}()
 
-	caption := fmt.Sprintf("Бекап %s (%s)", result.CreatedAt.Format("2006-01-02 15:04:05"), backup.FormatSize(result.Size))
+	caption := fmt.Sprintf("Бекап %s — %s (%s)", target, result.CreatedAt.Format("2006-01-02 15:04:05"), backup.FormatSize(result.Size))
 	if len(result.Warnings) > 0 {
 		caption += "\n\nПредупреждения:\n" + strings.Join(result.Warnings, "\n")
 	}
@@ -162,7 +200,14 @@ func (s *Service) runBackup(chatID, userID int64) {
 	log.Printf("backup sent to chat %d (%s)", chatID, backup.FormatSize(result.Size))
 }
 
-func (s *Service) hasAgentNodes() bool {
+func (s *Service) needsAgentSync(scope backupScope) bool {
+	if s.agentReg == nil {
+		return false
+	}
+	if scope.strict && len(scope.nodeNames) == 1 {
+		node, _, err := s.cfg.FindNode(scope.nodeNames[0])
+		return err == nil && node.NormalizedMode() == config.NodeModeAgent
+	}
 	for _, node := range s.cfg.Nodes {
 		if node.NormalizedMode() == config.NodeModeAgent {
 			return true
@@ -171,17 +216,31 @@ func (s *Service) hasAgentNodes() bool {
 	return false
 }
 
-func (s *Service) CreateBackup() (*backup.Result, error) {
+func (s *Service) CreateBackup(scope backupScope) (*backup.Result, error) {
 	var syncWarnings []string
 	skipNodes := make(map[string]bool)
-	if s.agentReg != nil && s.hasAgentNodes() {
-		failed, warns, err := agent.SyncAgentNodes(s.cfg, s.agentReg)
-		syncWarnings = warns
-		if err != nil {
-			return nil, err
-		}
-		for _, name := range failed {
-			skipNodes[name] = true
+
+	if s.agentReg != nil {
+		if scope.strict && len(scope.nodeNames) == 1 {
+			name := scope.nodeNames[0]
+			node, _, err := s.cfg.FindNode(name)
+			if err != nil {
+				return nil, err
+			}
+			if node.NormalizedMode() == config.NodeModeAgent {
+				if err := agent.SyncAgentNode(s.cfg, s.agentReg, name); err != nil {
+					return nil, fmt.Errorf("%s: %w", name, err)
+				}
+			}
+		} else if scope.nodeNames == nil {
+			failed, warns, err := agent.SyncAgentNodes(s.cfg, s.agentReg)
+			syncWarnings = warns
+			if err != nil {
+				return nil, err
+			}
+			for _, name := range failed {
+				skipNodes[name] = true
+			}
 		}
 	}
 
@@ -196,6 +255,10 @@ func (s *Service) CreateBackup() (*backup.Result, error) {
 		Exclude:       s.cfg.Backup.Exclude,
 		TmpDir:        s.cfg.TmpDir,
 		Nodes:         s.cfg.Nodes,
+		IncludeLocal:  scope.includeLocal,
+		NodesFilter:   scope.nodeNames,
+		ArchiveLabel:  scope.label,
+		Strict:        scope.strict,
 		SkipNodes:     skipNodes,
 		MaxStagingAge: maxStagingAge,
 		StagingDir:    s.cfg.StagingDir,
@@ -221,7 +284,7 @@ func (s *Service) CreateBackup() (*backup.Result, error) {
 }
 
 func (s *Service) SendBackupTo(chatID int64) error {
-	result, err := s.CreateBackup()
+	result, err := s.CreateBackup(backupScope{includeLocal: true, strict: false})
 	if err != nil {
 		s.setLastBackup(LastBackup{Time: time.Now(), Success: false, Error: err.Error()})
 		return err

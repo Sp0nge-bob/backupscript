@@ -23,6 +23,10 @@ type Config struct {
 	Exclude          []string
 	TmpDir           string
 	Nodes            []config.NodeConfig
+	IncludeLocal     bool
+	NodesFilter      []string
+	ArchiveLabel     string
+	Strict           bool
 	SkipNodes        map[string]bool
 	StagingDir       func(string) string
 	MaxStagingAge    time.Duration
@@ -61,7 +65,11 @@ func Create(cfg Config) (*Result, error) {
 	}
 
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
-	archiveName := fmt.Sprintf("%s_%s.zip", cfg.Name, timestamp)
+	archiveName := cfg.Name + "_"
+	if label := strings.TrimSpace(cfg.ArchiveLabel); label != "" {
+		archiveName += label + "_"
+	}
+	archiveName += timestamp + ".zip"
 	archivePath := filepath.Join(cfg.TmpDir, archiveName)
 
 	result := &Result{
@@ -80,34 +88,71 @@ func Create(cfg Config) (*Result, error) {
 	localCfg := cfg
 	localCfg.Paths = cfg.Paths
 
-	if len(cfg.Paths) == 0 {
-		result.Warnings = append(result.Warnings, prefixWarning(LocalPrefix, "пути master не заданы — папка local/ не создаётся; добавьте через /paths add"))
+	includeLocal := cfg.IncludeLocal
+	nodes := filterNodes(cfg.Nodes, cfg.NodesFilter)
+
+	if includeLocal {
+		if len(cfg.Paths) == 0 {
+			msg := prefixWarning(LocalPrefix, "пути master не заданы — добавьте через /paths add")
+			if cfg.Strict {
+				zw.Close()
+				zipFile.Close()
+				os.Remove(archivePath)
+				return nil, fmt.Errorf("%s", msg)
+			}
+			result.Warnings = append(result.Warnings, msg)
+		}
+
+		for _, sourcePath := range cfg.Paths {
+			warn, count, err := addLocalSource(zw, sourcePath, localCfg, LocalPrefix)
+			if err != nil {
+				zw.Close()
+				zipFile.Close()
+				os.Remove(archivePath)
+				return nil, err
+			}
+			if warn != "" {
+				result.Warnings = append(result.Warnings, prefixWarning(LocalPrefix, warn))
+			}
+			added += count
+			localAdded += count
+		}
+
+		if len(cfg.Paths) > 0 && localAdded == 0 {
+			msg := prefixWarning(LocalPrefix, "файлы не добавлены — проверьте пути через /paths list")
+			if cfg.Strict {
+				zw.Close()
+				zipFile.Close()
+				os.Remove(archivePath)
+				return nil, fmt.Errorf("%s", msg)
+			}
+			result.Warnings = append(result.Warnings, msg)
+		}
 	}
 
-	for _, sourcePath := range cfg.Paths {
-		warn, count, err := addLocalSource(zw, sourcePath, localCfg, LocalPrefix)
+	for _, node := range nodes {
+		warns, count, err := addNodeSources(zw, node, cfg)
 		if err != nil {
+			if cfg.Strict {
+				zw.Close()
+				zipFile.Close()
+				os.Remove(archivePath)
+				return nil, fmt.Errorf("%s: %w", node.Name, err)
+			}
+			result.Warnings = append(result.Warnings, prefixWarning(node.Name, err.Error()))
+			continue
+		}
+		if cfg.Strict && count == 0 && len(warns) > 0 {
 			zw.Close()
 			zipFile.Close()
 			os.Remove(archivePath)
-			return nil, err
+			return nil, fmt.Errorf("%s: %s", node.Name, strings.Join(warns, "; "))
 		}
-		if warn != "" {
-			result.Warnings = append(result.Warnings, prefixWarning(LocalPrefix, warn))
-		}
-		added += count
-		localAdded += count
-	}
-
-	if len(cfg.Paths) > 0 && localAdded == 0 {
-		result.Warnings = append(result.Warnings, prefixWarning(LocalPrefix, "файлы не добавлены — проверьте пути через /paths list"))
-	}
-
-	for _, node := range cfg.Nodes {
-		warns, count, err := addNodeSources(zw, node, cfg)
-		if err != nil {
-			result.Warnings = append(result.Warnings, prefixWarning(node.Name, err.Error()))
-			continue
+		if cfg.Strict && count == 0 {
+			zw.Close()
+			zipFile.Close()
+			os.Remove(archivePath)
+			return nil, fmt.Errorf("%s: no files added", node.Name)
 		}
 		result.Warnings = append(result.Warnings, warns...)
 		added += count
@@ -347,6 +392,23 @@ func zipEntryWithPrefix(prefix, absPath string) string {
 		entry = prefix + "/" + entry
 	}
 	return entry
+}
+
+func filterNodes(nodes []config.NodeConfig, names []string) []config.NodeConfig {
+	if names == nil {
+		return nodes
+	}
+	allowed := make(map[string]bool, len(names))
+	for _, name := range names {
+		allowed[name] = true
+	}
+	var filtered []config.NodeConfig
+	for _, node := range nodes {
+		if allowed[node.Name] {
+			filtered = append(filtered, node)
+		}
+	}
+	return filtered
 }
 
 func prefixWarning(prefix, msg string) string {
