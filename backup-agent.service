@@ -1,0 +1,16 @@
+[Unit]
+Description=Backup Agent for backupscript master
+After=network.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=-/etc/backup-agent/env
+Environment=AGENT_CONFIG_PATH=/etc/backup-agent/config.yaml
+ExecStart=/opt/backup-agent/backup-agent
+Restart=on-failure
+RestartSec=10
+MemoryMax=32M
+
+[Install]
+WantedBy=multi-user.target

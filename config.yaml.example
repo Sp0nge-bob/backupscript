@@ -2,13 +2,38 @@ backup:
   name: "server-backup"
   paths:
     - /etc/nginx/nginx.conf
-    - /etc/nginx/sites-enabled/
+    - /etc/nginx/conf.d/
     - /etc/x-ui/x-ui.db
   exclude:
     - "*.log"
     - "*.sock"
+    - "*.save"
 
 schedule:
   enabled: true
   interval: "24h"
   notify_chat_id: null
+
+agent:
+  listen: "0.0.0.0:9876"
+  max_staging_age: "2h"
+
+nodes:
+  # SSH-нода: master сам забирает файлы
+  # - name: "nl2"
+  #   mode: "ssh"
+  #   host: "203.0.113.10"
+  #   port: 22
+  #   user: "root"
+  #   key_file: "/root/.ssh/backup_nodes"
+  #   paths:
+  #     - /etc/nginx/conf.d/
+  #     - /etc/x-ui/x-ui.db
+
+  # Agent-нода: на удалённом VPS ставится backup-agent
+  # - name: "nl3"
+  #   mode: "agent"
+  #   token: "случайный-секрет-на-ноду"
+  #   paths:
+  #     - /etc/nginx/conf.d/
+  #     - /etc/x-ui/x-ui.db

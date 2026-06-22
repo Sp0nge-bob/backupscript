@@ -8,15 +8,24 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Sp0nge-bob/backupscript/internal/config"
+	"github.com/Sp0nge-bob/backupscript/internal/remote"
 )
 
 const MaxTelegramFileSize = 50 * 1024 * 1024
 
+const LocalPrefix = "local"
+
 type Config struct {
-	Name    string
-	Paths   []string
-	Exclude []string
-	TmpDir  string
+	Name              string
+	Paths             []string
+	Exclude           []string
+	TmpDir            string
+	Nodes             []config.NodeConfig
+	StagingDir        func(string) string
+	MaxStagingAge     time.Duration
+	StagingStaleWarn  func(string) string
 }
 
 type PathStatus struct {
@@ -66,9 +75,11 @@ func Create(cfg Config) (*Result, error) {
 
 	zw := zip.NewWriter(zipFile)
 	added := 0
+	localCfg := cfg
+	localCfg.Paths = cfg.Paths
 
 	for _, sourcePath := range cfg.Paths {
-		warn, count, err := addSource(zw, sourcePath, cfg)
+		warn, count, err := addLocalSource(zw, sourcePath, localCfg, LocalPrefix)
 		if err != nil {
 			zw.Close()
 			zipFile.Close()
@@ -76,8 +87,18 @@ func Create(cfg Config) (*Result, error) {
 			return nil, err
 		}
 		if warn != "" {
-			result.Warnings = append(result.Warnings, warn)
+			result.Warnings = append(result.Warnings, prefixWarning(LocalPrefix, warn))
 		}
+		added += count
+	}
+
+	for _, node := range cfg.Nodes {
+		warns, count, err := addNodeSources(zw, node, cfg)
+		if err != nil {
+			result.Warnings = append(result.Warnings, prefixWarning(node.Name, err.Error()))
+			continue
+		}
+		result.Warnings = append(result.Warnings, warns...)
 		added += count
 	}
 
@@ -93,7 +114,7 @@ func Create(cfg Config) (*Result, error) {
 
 	if added == 0 {
 		os.Remove(archivePath)
-		return nil, fmt.Errorf("no files added to archive; check backup.paths in config")
+		return nil, fmt.Errorf("no files added to archive; check backup.paths and nodes")
 	}
 
 	info, err := os.Stat(archivePath)
@@ -106,7 +127,7 @@ func Create(cfg Config) (*Result, error) {
 	if result.Size > MaxTelegramFileSize {
 		os.Remove(archivePath)
 		return nil, fmt.Errorf(
-			"archive size %s exceeds Telegram limit of 50 MB; reduce backup.paths or split backup",
+			"archive size %s exceeds Telegram limit of 50 MB; reduce paths or nodes",
 			formatSize(result.Size),
 		)
 	}
@@ -114,27 +135,69 @@ func Create(cfg Config) (*Result, error) {
 	return result, nil
 }
 
-func addSource(zw *zip.Writer, sourcePath string, cfg Config) (warning string, count int, err error) {
+func addNodeSources(zw *zip.Writer, node config.NodeConfig, cfg Config) (warnings []string, count int, err error) {
+	switch node.NormalizedMode() {
+	case config.NodeModeSSH:
+		client, connErr := remote.Connect(node)
+		if connErr != nil {
+			return nil, 0, fmt.Errorf("ssh connect failed: %w", connErr)
+		}
+		defer client.Close()
+		warns, added, addErr := client.AddToZip(zw, node.Paths, cfg.Exclude, node.Name, cfg.TmpDir)
+		for _, w := range warns {
+			warnings = append(warnings, prefixWarning(node.Name, w))
+		}
+		return warnings, added, addErr
+
+	case config.NodeModeAgent:
+		if cfg.StagingStaleWarn != nil {
+			if warn := cfg.StagingStaleWarn(node.Name); warn != "" {
+				warnings = append(warnings, prefixWarning(node.Name, warn))
+			}
+		}
+		stagingDir := ""
+		if cfg.StagingDir != nil {
+			stagingDir = cfg.StagingDir(node.Name)
+		}
+		if stagingDir == "" {
+			return []string{prefixWarning(node.Name, "staging dir not configured")}, 0, nil
+		}
+		if _, statErr := os.Stat(stagingDir); statErr != nil {
+			return []string{prefixWarning(node.Name, "no agent upload yet")}, 0, nil
+		}
+		localCfg := cfg
+		localCfg.Paths = []string{stagingDir}
+		warn, added, walkErr := addLocalDirectory(zw, stagingDir, localCfg, node.Name, true)
+		if warn != "" {
+			warnings = append(warnings, prefixWarning(node.Name, warn))
+		}
+		return warnings, added, walkErr
+
+	default:
+		return nil, 0, fmt.Errorf("unknown node mode %q", node.Mode)
+	}
+}
+
+func addLocalSource(zw *zip.Writer, sourcePath string, cfg Config, prefix string) (warning string, count int, err error) {
 	info, statErr := os.Stat(sourcePath)
 	if statErr != nil {
 		return fmt.Sprintf("missing: %s", sourcePath), 0, nil
 	}
 
 	if info.IsDir() {
-		count, err = addDirectory(zw, sourcePath, cfg)
-		return "", count, err
+		return addLocalDirectory(zw, sourcePath, cfg, prefix, false)
 	}
 
 	if isSQLite(sourcePath) {
-		return addSQLiteFile(zw, sourcePath, cfg.TmpDir)
+		return addSQLiteFile(zw, sourcePath, cfg.TmpDir, prefix)
 	}
 
-	return "", 0, addFile(zw, sourcePath, zipEntryName(sourcePath))
+	entry := zipEntryWithPrefix(prefix, sourcePath)
+	return "", 0, AddLocalFile(zw, sourcePath, entry)
 }
 
-func addDirectory(zw *zip.Writer, root string, cfg Config) (int, error) {
-	count := 0
-	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+func addLocalDirectory(zw *zip.Writer, root string, cfg Config, prefix string, stripRoot bool) (warning string, count int, err error) {
+	err = filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -144,24 +207,50 @@ func addDirectory(zw *zip.Writer, root string, cfg Config) (int, error) {
 		if shouldExclude(info.Name(), cfg.Exclude) {
 			return nil
 		}
+
+		entryPath := path
+		if stripRoot {
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				return relErr
+			}
+			entryPath = rel
+			entry := prefix + "/" + filepath.ToSlash(rel)
+			if isSQLite(path) {
+				_, _, err := addSQLiteFileWithEntry(zw, path, cfg.TmpDir, entry)
+				if err != nil {
+					return err
+				}
+				count++
+				return nil
+			}
+			return AddLocalFile(zw, path, entry)
+		}
+
 		if isSQLite(path) {
-			_, _, err := addSQLiteFile(zw, path, cfg.TmpDir)
+			_, _, err := addSQLiteFile(zw, path, cfg.TmpDir, prefix)
 			if err != nil {
 				return err
 			}
 			count++
 			return nil
 		}
-		if err := addFile(zw, path, zipEntryName(path)); err != nil {
+		entry := zipEntryWithPrefix(prefix, entryPath)
+		if err := AddLocalFile(zw, path, entry); err != nil {
 			return err
 		}
 		count++
 		return nil
 	})
-	return count, err
+	return warning, count, err
 }
 
-func addSQLiteFile(zw *zip.Writer, sourcePath, tmpDir string) (warning string, count int, err error) {
+func addSQLiteFile(zw *zip.Writer, sourcePath, tmpDir, prefix string) (warning string, count int, err error) {
+	entry := zipEntryWithPrefix(prefix, sourcePath)
+	return addSQLiteFileWithEntry(zw, sourcePath, tmpDir, entry)
+}
+
+func addSQLiteFileWithEntry(zw *zip.Writer, sourcePath, tmpDir, entry string) (warning string, count int, err error) {
 	base := filepath.Base(sourcePath)
 	tmpCopy := filepath.Join(tmpDir, fmt.Sprintf("sqlite-copy-%d-%s", time.Now().UnixNano(), base))
 
@@ -187,13 +276,13 @@ func addSQLiteFile(zw *zip.Writer, sourcePath, tmpDir string) (warning string, c
 	}
 	defer os.Remove(tmpCopy)
 
-	if err := addFile(zw, tmpCopy, zipEntryName(sourcePath)); err != nil {
+	if err := AddLocalFile(zw, tmpCopy, entry); err != nil {
 		return "", 0, err
 	}
 	return "", 1, nil
 }
 
-func addFile(zw *zip.Writer, sourcePath, entryName string) error {
+func AddLocalFile(zw *zip.Writer, sourcePath, entryName string) error {
 	src, err := os.Open(sourcePath)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", sourcePath, err)
@@ -237,8 +326,19 @@ func shouldExclude(name string, patterns []string) bool {
 	return false
 }
 
-func zipEntryName(absPath string) string {
-	return strings.TrimPrefix(filepath.ToSlash(absPath), "/")
+func zipEntryWithPrefix(prefix, absPath string) string {
+	entry := strings.TrimPrefix(filepath.ToSlash(absPath), "/")
+	if prefix != "" {
+		entry = prefix + "/" + entry
+	}
+	return entry
+}
+
+func prefixWarning(prefix, msg string) string {
+	if prefix == "" {
+		return msg
+	}
+	return prefix + ": " + msg
 }
 
 func FormatSize(size int64) string {

@@ -25,8 +25,10 @@ type ScheduleConfig struct {
 }
 
 type YAMLConfig struct {
-	Backup   BackupConfig   `yaml:"backup"`
-	Schedule ScheduleConfig `yaml:"schedule"`
+	Backup   BackupConfig     `yaml:"backup"`
+	Schedule ScheduleConfig   `yaml:"schedule"`
+	Agent    AgentConfig      `yaml:"agent"`
+	Nodes    []NodeConfig     `yaml:"nodes"`
 }
 
 type Config struct {
@@ -37,6 +39,8 @@ type Config struct {
 	TmpDir         string
 	Backup         BackupConfig
 	Schedule       ScheduleConfig
+	Agent          AgentConfig
+	Nodes          []NodeConfig
 }
 
 func Load() (*Config, error) {
@@ -95,8 +99,20 @@ func Load() (*Config, error) {
 	if yamlCfg.Backup.Name == "" {
 		yamlCfg.Backup.Name = "server-backup"
 	}
-	if len(yamlCfg.Backup.Paths) == 0 {
-		return nil, fmt.Errorf("backup.paths is empty in %s", configPath)
+	if yamlCfg.Agent.Listen == "" {
+		yamlCfg.Agent.Listen = "0.0.0.0:9876"
+	}
+	if yamlCfg.Agent.MaxStagingAge == "" {
+		yamlCfg.Agent.MaxStagingAge = "2h"
+	}
+	if yamlCfg.Nodes == nil {
+		yamlCfg.Nodes = []NodeConfig{}
+	}
+	if err := validateNodes(yamlCfg.Nodes); err != nil {
+		return nil, err
+	}
+	if !hasAnyBackupPaths(yamlCfg.Backup, yamlCfg.Nodes) {
+		return nil, fmt.Errorf("no backup paths configured (backup.paths or nodes[].paths)")
 	}
 
 	return &Config{
@@ -107,6 +123,8 @@ func Load() (*Config, error) {
 		TmpDir:         tmpDir,
 		Backup:         yamlCfg.Backup,
 		Schedule:       yamlCfg.Schedule,
+		Agent:          yamlCfg.Agent,
+		Nodes:          yamlCfg.Nodes,
 	}, nil
 }
 
@@ -179,6 +197,8 @@ func (c *Config) saveYAML(mutate func(*YAMLConfig) error) error {
 
 	c.Backup = yamlCfg.Backup
 	c.Schedule = yamlCfg.Schedule
+	c.Agent = yamlCfg.Agent
+	c.Nodes = yamlCfg.Nodes
 	return nil
 }
 
@@ -190,8 +210,8 @@ func (c *Config) SaveSchedule(schedule ScheduleConfig) error {
 }
 
 func (c *Config) SaveBackup(backupCfg BackupConfig) error {
-	if len(backupCfg.Paths) == 0 {
-		return fmt.Errorf("должен остаться хотя бы один путь")
+	if !hasAnyBackupPaths(backupCfg, c.Nodes) {
+		return fmt.Errorf("должен остаться хотя бы один путь (master или ноды)")
 	}
 	return c.saveYAML(func(yamlCfg *YAMLConfig) error {
 		if backupCfg.Name == "" {
@@ -232,10 +252,6 @@ func (c *Config) RemoveBackupPath(path string) error {
 		return err
 	}
 
-	if len(c.Backup.Paths) <= 1 {
-		return fmt.Errorf("нельзя удалить последний путь")
-	}
-
 	var paths []string
 	found := false
 	for _, existing := range c.Backup.Paths {
@@ -251,5 +267,8 @@ func (c *Config) RemoveBackupPath(path string) error {
 
 	backupCfg := c.Backup
 	backupCfg.Paths = paths
+	if !hasAnyBackupPaths(backupCfg, c.Nodes) {
+		return fmt.Errorf("нельзя удалить последний путь")
+	}
 	return c.SaveBackup(backupCfg)
 }

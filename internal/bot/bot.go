@@ -10,6 +10,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
+	"github.com/Sp0nge-bob/backupscript/internal/agent"
 	"github.com/Sp0nge-bob/backupscript/internal/backup"
 	"github.com/Sp0nge-bob/backupscript/internal/config"
 	"github.com/Sp0nge-bob/backupscript/internal/interval"
@@ -28,6 +29,7 @@ type Service struct {
 	api        *tgbotapi.BotAPI
 	cfg        *config.Config
 	sched      *scheduler.Manager
+	agentReg   *agent.Registry
 	mu         sync.RWMutex
 	lastBackup LastBackup
 }
@@ -38,6 +40,10 @@ func New(api *tgbotapi.BotAPI, cfg *config.Config) *Service {
 
 func (s *Service) SetScheduler(sched *scheduler.Manager) {
 	s.sched = sched
+}
+
+func (s *Service) SetAgentRegistry(reg *agent.Registry) {
+	s.agentReg = reg
 }
 
 func (s *Service) Run() {
@@ -67,7 +73,7 @@ func (s *Service) handleCommand(msg *tgbotapi.Message) {
 
 	switch msg.Command() {
 	case "start":
-		text := "Бот бекапов сервера.\n\nКоманды:\n/backup — создать и отправить архив\n/paths — пути бекапа (add/remove)\n/schedule — интервал автобекапа (30m, 6h, 7d)\n/list — все настройки\n/status — статус\n/help — справка"
+		text := "Бот бекапов сервера.\n\nКоманды:\n/backup — создать и отправить архив\n/paths — пути master (add/remove)\n/nodes — удалённые ноды\n/schedule — интервал автобекапа\n/list — все настройки\n/status — статус\n/help — справка"
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("Сделать бекап", "backup"),
@@ -88,8 +94,10 @@ func (s *Service) handleCommand(msg *tgbotapi.Message) {
 		s.handleSchedule(msg.Chat.ID, strings.TrimSpace(msg.CommandArguments()))
 	case "paths":
 		s.handlePaths(msg.Chat.ID, strings.TrimSpace(msg.CommandArguments()))
+	case "nodes":
+		s.handleNodes(msg.Chat.ID, strings.TrimSpace(msg.CommandArguments()))
 	case "help":
-		s.sendText(msg.Chat.ID, "Команды:\n/backup — архив и отправка\n/paths — пути: add, remove, list\n/schedule — автобекап: /schedule 6h, /schedule off\n/list — все настройки\n/status — последний бекап\n/help — эта справка\n\n/paths add /etc/x-ui/x-ui.db\n/paths remove /etc/foo\n\nИнтервал: 30m, 6h, 7d, 1w (минимум 1m).")
+		s.sendText(msg.Chat.ID, "Команды:\n/backup — архив и отправка\n/paths — пути master: add, remove, list\n/nodes — ноды: list, status, paths\n/schedule — автобекап: /schedule 6h, /schedule off\n/list — все настройки\n/status — последний бекап\n\n/nodes paths add nl2 /etc/foo\nИнтервал: 30m, 6h, 7d, 1w (минимум 1m).")
 	default:
 		s.sendText(msg.Chat.ID, "Неизвестная команда. /help")
 	}
@@ -152,11 +160,32 @@ func (s *Service) runBackup(chatID, userID int64) {
 }
 
 func (s *Service) CreateBackup() (*backup.Result, error) {
+	maxStagingAge, err := s.cfg.Agent.MaxStagingAgeDuration()
+	if err != nil {
+		return nil, err
+	}
+
 	return backup.Create(backup.Config{
-		Name:    s.cfg.Backup.Name,
-		Paths:   s.cfg.Backup.Paths,
-		Exclude: s.cfg.Backup.Exclude,
-		TmpDir:  s.cfg.TmpDir,
+		Name:          s.cfg.Backup.Name,
+		Paths:         s.cfg.Backup.Paths,
+		Exclude:       s.cfg.Backup.Exclude,
+		TmpDir:        s.cfg.TmpDir,
+		Nodes:         s.cfg.Nodes,
+		MaxStagingAge: maxStagingAge,
+		StagingDir:    s.cfg.StagingDir,
+		StagingStaleWarn: func(nodeName string) string {
+			if s.agentReg == nil {
+				return ""
+			}
+			age, ok := s.agentReg.StagingAge(nodeName)
+			if !ok {
+				return "no agent upload yet"
+			}
+			if age > maxStagingAge {
+				return fmt.Sprintf("agent data stale (%s old)", formatDuration(age))
+			}
+			return ""
+		},
 	})
 }
 
@@ -264,7 +293,7 @@ func (s *Service) sendList(chatID int64) {
 	var b strings.Builder
 	b.WriteString("Настройки из config.yaml:\n\n")
 	b.WriteString(fmt.Sprintf("Автобекап: %s\n\n", s.cfg.Schedule.ScheduleDescription()))
-	b.WriteString("Пути бекапа:\n")
+	b.WriteString("Пути master:\n")
 	for _, st := range statuses {
 		state := "ok"
 		if !st.Exists {
@@ -274,7 +303,30 @@ func (s *Service) sendList(chatID int64) {
 		}
 		b.WriteString(fmt.Sprintf("%s — %s\n", state, st.Path))
 	}
+
+	if len(s.cfg.Nodes) > 0 {
+		maxAge, _ := s.cfg.Agent.MaxStagingAgeDuration()
+		b.WriteString("\nНоды:\n")
+		for _, node := range s.cfg.Nodes {
+			b.WriteString(s.formatNodeSummary(node, maxAge))
+			b.WriteString("\n")
+		}
+	}
+
 	s.sendText(chatID, b.String())
+}
+
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
 func (s *Service) handleSchedule(chatID int64, arg string) {

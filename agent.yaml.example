@@ -1,0 +1,8 @@
+node: "nl3"
+master_url: "http://MASTER_IP:9876"
+token: "случайный-секрет-на-ноду"
+paths:
+  - /etc/nginx/conf.d/
+  - /etc/x-ui/x-ui.db
+interval: "1h"
+tmp_dir: "/tmp/backup-agent"
