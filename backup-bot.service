@@ -1,0 +1,16 @@
+[Unit]
+Description=Telegram Backup Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/backup-bot
+EnvironmentFile=/opt/backup-bot/.env
+ExecStart=/opt/backup-bot/backup-bot
+Restart=on-failure
+RestartSec=10
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target

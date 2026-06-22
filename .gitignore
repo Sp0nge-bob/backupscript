@@ -1,0 +1,33 @@
+# Secrets and local config
+.env
+config.yaml
+
+# Build output
+backup-bot
+backup-bot.exe
+dist/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Temp backups
+/tmp/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Cursor MCP (local only)
+mcps/
+.grok/

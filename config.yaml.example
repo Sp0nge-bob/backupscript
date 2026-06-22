@@ -1,0 +1,14 @@
+backup:
+  name: "server-backup"
+  paths:
+    - /etc/nginx/nginx.conf
+    - /etc/nginx/sites-enabled/
+    - /etc/x-ui/x-ui.db
+  exclude:
+    - "*.log"
+    - "*.sock"
+
+schedule:
+  enabled: true
+  cron: "0 3 * * *"
+  notify_chat_id: null
