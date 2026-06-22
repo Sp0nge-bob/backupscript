@@ -324,7 +324,10 @@ func (s *Service) sendList(chatID int64) {
 	var b strings.Builder
 	b.WriteString("Настройки из config.yaml:\n\n")
 	b.WriteString(fmt.Sprintf("Автобекап: %s\n\n", s.cfg.Schedule.ScheduleDescription()))
-	b.WriteString("Пути master:\n")
+	b.WriteString("Пути master (префикс local/ в zip):\n")
+	if len(statuses) == 0 {
+		b.WriteString("(пусто — в архиве только ноды)\n")
+	}
 	for _, st := range statuses {
 		state := "ok"
 		if !st.Exists {

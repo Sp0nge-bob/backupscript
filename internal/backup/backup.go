@@ -76,8 +76,13 @@ func Create(cfg Config) (*Result, error) {
 
 	zw := zip.NewWriter(zipFile)
 	added := 0
+	localAdded := 0
 	localCfg := cfg
 	localCfg.Paths = cfg.Paths
+
+	if len(cfg.Paths) == 0 {
+		result.Warnings = append(result.Warnings, prefixWarning(LocalPrefix, "пути master не заданы — папка local/ не создаётся; добавьте через /paths add"))
+	}
 
 	for _, sourcePath := range cfg.Paths {
 		warn, count, err := addLocalSource(zw, sourcePath, localCfg, LocalPrefix)
@@ -91,6 +96,11 @@ func Create(cfg Config) (*Result, error) {
 			result.Warnings = append(result.Warnings, prefixWarning(LocalPrefix, warn))
 		}
 		added += count
+		localAdded += count
+	}
+
+	if len(cfg.Paths) > 0 && localAdded == 0 {
+		result.Warnings = append(result.Warnings, prefixWarning(LocalPrefix, "файлы не добавлены — проверьте пути через /paths list"))
 	}
 
 	for _, node := range cfg.Nodes {
