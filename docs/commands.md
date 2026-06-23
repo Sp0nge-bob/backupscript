@@ -62,6 +62,7 @@
 /nodes list
 /nodes status nl2
 /nodes ping nl3
+/nodes ping all
 /nodes paths list nl2
 /nodes paths add nl2 /etc/nginx/conf.d/
 /nodes paths remove nl2 /etc/foo
@@ -71,7 +72,8 @@
 |------------|------------|
 | `list` | Все ноды и режим (ssh / agent) |
 | `status <имя>` | Детали ноды, пути, доступность |
-| `ping <имя>` | Проверка SSH или agent прямо сейчас |
+| `ping <имя>` | Проверка SSH или agent одной ноды |
+| `ping all` | Проверка **всех** нод сразу |
 | `paths list/add/remove` | Управление путями на ноде |
 
 > Добавление новой ноды (host, token, mode) — только в `config.yaml`. Пути на ноде — через `/nodes paths`.

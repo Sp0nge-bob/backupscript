@@ -97,7 +97,7 @@ func (s *Service) handleCommand(msg *tgbotapi.Message) {
 	case "nodes":
 		s.handleNodes(msg.Chat.ID, strings.TrimSpace(msg.CommandArguments()))
 	case "help":
-		s.sendText(msg.Chat.ID, "Команды:\n/backup — все серверы\n/backup local — только master\n/backup nl2 — одна нода\n/paths — пути master: add, remove, list\n/nodes — ноды: list, status, ping, paths\n/schedule — автобекап: /schedule 6h, /schedule off\n/list — все настройки\n/status — последний бекап\n\n/nodes ping nl3 — проверить agent\nИнтервал: 30m, 6h, 7d, 1w (минимум 1m).")
+		s.sendText(msg.Chat.ID, "Команды:\n/backup — все серверы\n/backup local — только master\n/backup nl2 — одна нода\n/paths — пути master: add, remove, list\n/nodes — ноды: list, status, ping, paths\n/schedule — автобекап: /schedule 6h, /schedule off\n/list — все настройки\n/status — последний бекап\n\n/nodes ping all — проверить все ноды\nИнтервал: 30m, 6h, 7d, 1w (минимум 1m).")
 	default:
 		s.sendText(msg.Chat.ID, "Неизвестная команда. /help")
 	}

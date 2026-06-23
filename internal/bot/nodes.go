@@ -35,7 +35,12 @@ func (s *Service) handleNodes(chatID int64, args string) {
 		s.sendNodeStatus(chatID, parts[1])
 	case "ping":
 		if len(parts) < 2 {
-			s.sendText(chatID, "Укажите ноду: /nodes ping nl3")
+			s.sendText(chatID, "Укажите ноду или all:\n/nodes ping nl3\n/nodes ping all")
+			return
+		}
+		target := strings.ToLower(strings.TrimSpace(parts[1]))
+		if target == "all" || target == "*" {
+			s.pingAllNodes(chatID)
 			return
 		}
 		s.pingNode(chatID, parts[1])
@@ -95,37 +100,57 @@ func (s *Service) handleNodePaths(chatID int64, nodeName, rest string) {
 }
 
 func (s *Service) sendNodesHelp(chatID int64) {
-	s.sendText(chatID, "Ноды (добавление ноды — в config.yaml):\n\n/nodes list\n/nodes status nl2\n/nodes ping nl3 — проверить agent-ноду\n/nodes paths list nl2\n/nodes paths add nl2 /etc/foo\n/nodes paths remove nl2 /etc/foo")
+	s.sendText(chatID, "Ноды (добавление ноды — в config.yaml):\n\n/nodes list\n/nodes status nl2\n/nodes ping nl3 — одна нода\n/nodes ping all — все ноды\n/nodes paths list nl2\n/nodes paths add nl2 /etc/foo\n/nodes paths remove nl2 /etc/foo")
 }
 
-func (s *Service) pingNode(chatID int64, nodeName string) {
-	if s.agentReg == nil {
-		s.sendText(chatID, "Проверка agent недоступна")
+func (s *Service) pingAllNodes(chatID int64) {
+	if len(s.cfg.Nodes) == 0 {
+		s.sendText(chatID, "Ноды не настроены")
 		return
 	}
 
+	var b strings.Builder
+	b.WriteString("Проверка нод:\n\n")
+	for _, node := range s.cfg.Nodes {
+		b.WriteString(s.pingNodeLine(node))
+		b.WriteString("\n")
+	}
+	s.sendText(chatID, b.String())
+}
+
+func (s *Service) pingNodeLine(node config.NodeConfig) string {
+	switch node.NormalizedMode() {
+	case config.NodeModeSSH:
+		if err := remote.Ping(node); err != nil {
+			return fmt.Sprintf("SSH %s: offline (%v)", node.Name, err)
+		}
+		return fmt.Sprintf("SSH %s: online", node.Name)
+	case config.NodeModeAgent:
+		if s.agentReg == nil {
+			return fmt.Sprintf("Agent %s: проверка недоступна", node.Name)
+		}
+		if err := agent.PingAgentNode(s.cfg, s.agentReg, node.Name); err != nil {
+			return fmt.Sprintf("Agent %s: offline (%v)", node.Name, err)
+		}
+		return fmt.Sprintf("Agent %s: online", node.Name)
+	default:
+		return fmt.Sprintf("%s: неизвестный режим", node.Name)
+	}
+}
+
+func (s *Service) pingNode(chatID int64, nodeName string) {
 	node, _, err := s.cfg.FindNode(nodeName)
 	if err != nil {
 		s.sendText(chatID, "Ошибка: "+err.Error())
 		return
 	}
 
-	switch node.NormalizedMode() {
-	case config.NodeModeSSH:
-		if err := remote.Ping(node); err != nil {
-			s.sendText(chatID, fmt.Sprintf("SSH %s: offline (%v)", nodeName, err))
-			return
-		}
-		s.sendText(chatID, fmt.Sprintf("SSH %s: online", nodeName))
-	case config.NodeModeAgent:
-		if err := agent.PingAgentNode(s.cfg, s.agentReg, nodeName); err != nil {
-			s.sendText(chatID, fmt.Sprintf("Agent %s: offline (%v)", nodeName, err))
-			return
-		}
-		s.sendText(chatID, fmt.Sprintf("Agent %s: online", nodeName))
-	default:
-		s.sendText(chatID, "Неизвестный режим ноды")
+	if node.NormalizedMode() == config.NodeModeAgent && s.agentReg == nil {
+		s.sendText(chatID, "Проверка agent недоступна")
+		return
 	}
+
+	s.sendText(chatID, s.pingNodeLine(node))
 }
 
 func (s *Service) sendNodesList(chatID int64) {
