@@ -45,30 +45,59 @@ func (s *Service) handleNodes(chatID int64, args string) {
 		}
 		s.pingNode(chatID, parts[1])
 	case "paths":
-		if len(parts) < 3 {
-			s.sendText(chatID, "Использование: /nodes paths list nl2")
+		action, nodeName, pathArg, err := parseNodePathsCommand(args)
+		if err != nil {
+			s.sendText(chatID, err.Error())
 			return
 		}
-		s.handleNodePaths(chatID, strings.ToLower(parts[1]), strings.TrimSpace(parts[2]))
+		s.handleNodePaths(chatID, action, nodeName, pathArg)
 	default:
 		s.sendNodesHelp(chatID)
 	}
 }
 
-func (s *Service) handleNodePaths(chatID int64, action, rest string) {
-	rest = strings.TrimSpace(rest)
-	if rest == "" {
-		s.sendText(chatID, "Использование:\n/nodes paths list nl2\n/nodes paths add nl2 /etc/foo\n/nodes paths remove nl2 /etc/foo")
-		return
+var nodePathActions = map[string]bool{
+	"list": true, "add": true, "remove": true, "rm": true, "del": true,
+}
+
+func parseNodePathsCommand(args string) (action, nodeName, pathArg string, err error) {
+	tail := strings.TrimSpace(args)
+	if !strings.HasPrefix(strings.ToLower(tail), "paths") {
+		return "", "", "", fmt.Errorf("использование: /nodes paths list nl2")
+	}
+	tail = strings.TrimSpace(tail[len("paths"):])
+	if tail == "" {
+		return "", "", "", fmt.Errorf("использование: /nodes paths list nl2")
 	}
 
-	sub := strings.SplitN(rest, " ", 2)
-	nodeName := sub[0]
-	pathArg := ""
-	if len(sub) > 1 {
-		pathArg = strings.TrimSpace(sub[1])
+	parts := strings.Fields(tail)
+	if len(parts) < 2 {
+		return "", "", "", fmt.Errorf("использование: /nodes paths list nl2")
 	}
 
+	first := strings.ToLower(parts[0])
+	second := strings.ToLower(parts[1])
+
+	switch {
+	case nodePathActions[first]:
+		action = first
+		nodeName = parts[1]
+		if len(parts) > 2 {
+			pathArg = strings.Join(parts[2:], " ")
+		}
+	case nodePathActions[second]:
+		nodeName = parts[0]
+		action = second
+		if len(parts) > 2 {
+			pathArg = strings.Join(parts[2:], " ")
+		}
+	default:
+		return "", "", "", fmt.Errorf("использование: /nodes paths list nl2")
+	}
+	return action, nodeName, pathArg, nil
+}
+
+func (s *Service) handleNodePaths(chatID int64, action, nodeName, pathArg string) {
 	switch action {
 	case "list":
 		s.sendNodePathsList(chatID, nodeName)
