@@ -45,17 +45,17 @@ func (s *Service) handleNodes(chatID int64, args string) {
 		}
 		s.pingNode(chatID, parts[1])
 	case "paths":
-		if len(parts) < 2 {
+		if len(parts) < 3 {
 			s.sendText(chatID, "Использование: /nodes paths list nl2")
 			return
 		}
-		s.handleNodePaths(chatID, parts[1], strings.TrimSpace(strings.Join(parts[2:], " ")))
+		s.handleNodePaths(chatID, strings.ToLower(parts[1]), strings.TrimSpace(parts[2]))
 	default:
 		s.sendNodesHelp(chatID)
 	}
 }
 
-func (s *Service) handleNodePaths(chatID int64, nodeName, rest string) {
+func (s *Service) handleNodePaths(chatID int64, action, rest string) {
 	rest = strings.TrimSpace(rest)
 	if rest == "" {
 		s.sendText(chatID, "Использование:\n/nodes paths list nl2\n/nodes paths add nl2 /etc/foo\n/nodes paths remove nl2 /etc/foo")
@@ -63,7 +63,7 @@ func (s *Service) handleNodePaths(chatID int64, nodeName, rest string) {
 	}
 
 	sub := strings.SplitN(rest, " ", 2)
-	action := strings.ToLower(sub[0])
+	nodeName := sub[0]
 	pathArg := ""
 	if len(sub) > 1 {
 		pathArg = strings.TrimSpace(sub[1])
